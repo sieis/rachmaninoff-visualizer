@@ -36,9 +36,14 @@
   #panel {
     position: fixed; top: 60px; right: 14px; width: 250px; padding: 14px 16px 12px;
     border-radius: 16px; background: rgba(18, 20, 30, .6); border: 1px solid rgba(255, 255, 255, .08);
-    backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px); max-height: calc(100vh - 74px); overflow-y: auto;
   }
   #panel[hidden] { display: none; }
+  details { margin-bottom: 10px; }
+  summary {
+    cursor: pointer; margin-bottom: 10px; color: #dfe3ee; font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase; font-size: 11px;
+  }
   .row { margin-bottom: 10px; }
   .row label { display: flex; justify-content: space-between; margin-bottom: 3px; color: #aab1c5; }
   .row output { color: #6f778d; font-variant-numeric: tabular-nums; }
@@ -65,19 +70,33 @@
   'use strict';
 
   // ---------- Settings ----------
-  const CONTROLS = [
-    { key: 'speed',     label: 'Speed',           min: 0.05, max: 1.5, step: 0.01, def: 0.35 },
-    { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8 },
-    { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
-    { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
-    { key: 'particles', label: 'Particles',       min: 0,    max: 1,   step: 0.01, def: 0.4 },
-    { key: 'pspeed',    label: 'Particle speed',  min: 0.2,  max: 3,   step: 0.01, def: 1 },
-    { key: 'pspread',   label: 'Particle spread', min: 0,    max: 3,   step: 0.01, def: 1 },
-    { key: 'shed',      label: 'Note shedding',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
-    { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
-    { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
-    { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
+  const GROUPS = [
+    { title: 'Keyboard', controls: [
+      { key: 'speed',     label: 'Speed',           min: 0.05, max: 1.5, step: 0.01, def: 0.35 },
+      { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8 },
+      { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
+      { key: 'wiggle',    label: 'Wiggle',          min: 0,    max: 1,   step: 0.01, def: 0 },
+      { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
+      { key: 'particles', label: 'Particles',       min: 0,    max: 1,   step: 0.01, def: 0.4 },
+      { key: 'pspeed',    label: 'Particle speed',  min: 0.2,  max: 3,   step: 0.01, def: 1 },
+      { key: 'pspread',   label: 'Particle spread', min: 0,    max: 3,   step: 0.01, def: 1 },
+      { key: 'shed',      label: 'Note shedding',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
+      { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
+      { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
+      { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
+    ] },
+    { title: 'Background', controls: [
+      { key: 'gshape',    label: 'Shape',           min: 0,    max: 6,   step: 1,    def: 0,
+        names: ['Star weave', 'Lotus', 'Lattice', 'Flower of Life', "Metatron's Cube", 'Mystic Rose', 'Torus'] },
+      { key: 'gcomplex',  label: 'Complexity',      min: 1,    max: 10,  step: 1,    def: 5 },
+      { key: 'gspin',     label: 'Spin',            min: 0,    max: 3,   step: 0.01, def: 0.4 },
+      { key: 'gopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.35 },
+      { key: 'gsat',      label: 'Saturation',      min: 0,    max: 1,   step: 0.01, def: 0.8 },
+      { key: 'weather',   label: 'Weather',         min: 0,    max: 2,   step: 1,    def: 0, names: ['Off', 'Rain', 'Snow'] },
+      { key: 'wamount',   label: 'Weather amount',  min: 0.05, max: 1,   step: 0.01, def: 0.5 },
+    ] },
   ];
+  const CONTROLS = GROUPS.flatMap(g => g.controls);
   const STORE = 'rach-viz-settings';
   const S = {};
   CONTROLS.forEach(c => S[c.key] = c.def);
@@ -86,17 +105,23 @@
 
   const rows = document.getElementById('rows');
   const inputs = {};
-  for (const c of CONTROLS) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML = `<label><span>${c.label}</span><output></output></label>
-      <input type="range" min="${c.min}" max="${c.max}" step="${c.step}">`;
-    const input = row.querySelector('input'), out = row.querySelector('output');
-    const show = () => out.textContent = (+input.value).toFixed(c.step < 1 ? 2 : 0);
-    input.value = S[c.key]; show();
-    input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); });
-    inputs[c.key] = { input, show };
-    rows.appendChild(row);
+  for (const g of GROUPS) {
+    const section = document.createElement('details');
+    section.open = true;
+    section.innerHTML = `<summary>${g.title}</summary>`;
+    rows.appendChild(section);
+    for (const c of g.controls) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<label><span>${c.label}</span><output></output></label>
+        <input type="range" min="${c.min}" max="${c.max}" step="${c.step}">`;
+      const input = row.querySelector('input'), out = row.querySelector('output');
+      const show = () => out.textContent = c.names ? c.names[+input.value] : (+input.value).toFixed(c.step < 1 ? 2 : 0);
+      input.value = S[c.key]; show();
+      input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); });
+      inputs[c.key] = { input, show };
+      section.appendChild(row);
+    }
   }
   document.getElementById('reset').onclick = () => {
     for (const c of CONTROLS) { S[c.key] = c.def; inputs[c.key].input.value = c.def; inputs[c.key].show(); }
@@ -118,11 +143,15 @@
   // ---------- Canvas ----------
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
+  // Bars render to their own layer: they glow additively against each other, then cover the backdrop
+  const barCanvas = document.createElement('canvas');
+  const bctx = barCanvas.getContext('2d');
   let W = 0, H = 0, DPR = 1;
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth; H = window.innerHeight;
-    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+    barCanvas.width = canvas.width = Math.round(W * DPR);
+    barCanvas.height = canvas.height = Math.round(H * DPR);
   }
   addEventListener('resize', resize);
   resize();
@@ -237,6 +266,209 @@
   canvas.addEventListener('pointerup', pointerUp);
   canvas.addEventListener('pointercancel', pointerUp);
 
+  // ---------- Sacred geometry backdrop ----------
+  const TAU = Math.PI * 2, GOLDEN = Math.PI * (3 - Math.sqrt(5));
+  const ring = (n, r, off = 0) =>
+    Array.from({ length: n }, (_, i) => [Math.cos(off + TAU * i / n) * r, Math.sin(off + TAU * i / n) * r]);
+  const allPairs = pts => pts.flatMap((a, i) => pts.slice(i + 1).map(b => [...a, ...b]));
+
+  // String-art star: spokes with shorter branch generations between them, and
+  // straight threads stitched from each spoke across to a neighbour.
+  function weave(axes, depth, bscale, skip, d) {
+    let spokes = Array.from({ length: axes }, (_, i) => ({ a: -Math.PI / 2 + TAU * i / axes, len: 1 }));
+    for (let g = 1; g <= depth; g++) {
+      const half = Math.PI / spokes.length;
+      spokes = spokes.flatMap(s => [s, { a: s.a + half, len: bscale ** g }]);
+    }
+    const tips = spokes.map(s => [Math.cos(s.a) * s.len, Math.sin(s.a) * s.len]);
+    const lines = [];
+    tips.forEach((A, i) => {
+      const B = tips[(i + skip) % tips.length];
+      lines.push([0, 0, ...A]);
+      for (let j = 0; j < d; j++) {
+        const fa = (d - j) / d, fb = (j + 1) / d;
+        lines.push([A[0] * fa, A[1] * fa, B[0] * fb, B[1] * fb]);
+      }
+    });
+    return { lines };
+  }
+  const disc = (pts, r) => pts.map(p => [...p, r]);
+  // Hex lattice points within n steps of the centre, n steps spanning radius 1 - 1/(n+1)
+  function hexPts(n) {
+    const r = 1 / (n + 1), pts = [];
+    for (let q = -n; q <= n; q++) for (let k = -n; k <= n; k++) {
+      const x = (q + k / 2) * r, y = k * r * Math.sqrt(3) / 2;
+      if (Math.hypot(x, y) <= n * r + 1e-6) pts.push([x, y]);
+    }
+    return disc(pts, r);
+  }
+  const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+
+  // Unit-radius shapes, each drawn as nested counter-rotating layers.
+  // t is the complexity slider, 0 (sparse) to 1 (dense).
+  const SHAPES = [
+    t => ({ layers: lerp(2, 6, t), scale: 0.72, ...weave(6, t < 0.15 ? 0 : t > 0.85 ? 2 : 1, 0.6, 1, lerp(5, 23, t)) }),
+    t => ({ layers: lerp(2, 5, t), scale: 0.7,  ...weave(lerp(5, 12, t), 1, 0.78, 1, lerp(5, 20, t)) }),
+    t => ({ layers: lerp(2, 5, t), scale: 0.74, ...weave(lerp(5, 13, t), 0, 1, 2, lerp(8, 24, t)) }),
+    t => ({ layers: lerp(1, 3, t), scale: 0.5,  circles: [[0, 0, 1], ...hexPts(lerp(1, 4, t))] }),
+    t => {
+      const u = t >= 0.3 ? 0.2 : 1 / 3; // circle radius; the sparse form has one ring, so it fills the space
+      const pts = [[0, 0], ...ring(6, 2 * u), ...(t >= 0.3 ? ring(6, 4 * u) : []), ...(t >= 0.75 ? ring(6, 2 * u * Math.sqrt(3), TAU / 12) : [])];
+      return { layers: lerp(1, 3, t), scale: 0.5, lines: allPairs(pts), circles: disc(pts, u) };
+    },
+    t => ({ layers: lerp(1, 5, t), scale: 0.62, lines: allPairs(ring(lerp(6, 22, t), 1)), circles: [[0, 0, 1]] }),
+    t => ({ layers: lerp(1, 5, t), scale: 0.62, circles: disc(ring(lerp(8, 48, t), 0.5), 0.5) }),
+  ];
+  const shapeCache = new Map();
+  function currentShape() {
+    const key = S.gshape + ':' + S.gcomplex;
+    if (!shapeCache.has(key)) {
+      const shape = (SHAPES[S.gshape] || SHAPES[0])((S.gcomplex - 1) / 9);
+      // Dim dense shapes so their centres don't burn out to white
+      const strokes = ((shape.lines || []).length + (shape.circles || []).length) * shape.layers;
+      shape.dim = Math.min(1, Math.sqrt(900 / strokes));
+      shapeCache.set(key, shape);
+    }
+    return shapeCache.get(key);
+  }
+
+  let geoT = 0;
+  function drawGeometry(dt, keyTop) {
+    geoT += dt * S.gspin;
+    if (S.gopacity <= 0 || keyTop < 40) return;
+    const shape = currentShape();
+    const R = Math.min(W * 0.48, keyTop * 0.54), cx = W / 2, cy = keyTop / 2;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < shape.layers; i++) {
+      const rot = i * GOLDEN + geoT * 0.25 * (1 + 0.23 * i) * (i % 2 ? -1 : 1);
+      const s = R * shape.scale ** i * (1 + 0.03 * Math.sin(geoT * 0.9 + i * 1.7));
+      ctx.save();
+      ctx.translate(cx, cy); ctx.rotate(rot); ctx.scale(s, s);
+      ctx.beginPath();
+      for (const l of shape.lines || []) { ctx.moveTo(l[0], l[1]); ctx.lineTo(l[2], l[3]); }
+      for (const c of shape.circles || []) { ctx.moveTo(c[0] + c[2], c[1]); ctx.arc(c[0], c[1], c[2], 0, TAU); }
+      ctx.restore(); // the path keeps its transform; stroke width stays in screen pixels
+
+      // Layers step through the same hue range as the keyboard, bass outside to treble inside
+      const hue = S.hue + S.spread * (shape.layers > 1 ? i / (shape.layers - 1) : 0.5), sat = S.gsat * 100;
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 60%, ${S.gopacity * shape.dim * 0.12})`;
+      ctx.lineWidth = 4; ctx.stroke();
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 66%, ${S.gopacity * shape.dim * 0.8})`;
+      ctx.lineWidth = 1; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Rounded bar whose sides follow off(y), a sideways shift that varies with height
+  function wavyRect(c, x, y, w, h, r, off) {
+    r = Math.min(r, w / 2, h / 2);
+    const y1 = y + h, a = Math.max(y + r, -20), b = Math.min(y1 - r, H + 20);
+    c.moveTo(x + off(y1 - r), y1 - r);
+    for (let yy = b; yy > a; yy -= 5) c.lineTo(x + off(yy), yy);
+    c.lineTo(x + off(y + r), y + r);
+    c.arcTo(x + off(y), y, x + w / 2 + off(y), y, r);
+    c.arcTo(x + w + off(y), y, x + w + off(y + r), y + r, r);
+    for (let yy = a; yy < b; yy += 5) c.lineTo(x + w + off(yy), yy);
+    c.lineTo(x + w + off(y1 - r), y1 - r);
+    c.arcTo(x + w + off(y1), y1, x + w / 2 + off(y1), y1, r);
+    c.arcTo(x + off(y1), y1, x + off(y1 - r), y1 - r, r);
+    c.closePath();
+  }
+
+  // ---------- Bars flatten against the top of the screen ----------
+  const smears = []; // { x, w, hue, start, end }  end is set once the bar's tail has gone through
+  function drawSmears(now) {
+    for (let i = smears.length - 1; i >= 0; i--) {
+      const s = smears[i];
+      const a = s.end == null ? 1 : 1 - (now - s.end) / 600;
+      if (a <= 0) { smears[i] = smears[smears.length - 1]; smears.pop(); continue; }
+      const rx = s.w * (0.6 + 1.9 * (1 - Math.exp(-(now - s.start) / 160)));
+      const g = ctx.createLinearGradient(s.x - rx, 0, s.x + rx, 0);
+      g.addColorStop(0, `hsla(${s.hue}, 95%, 60%, 0)`);
+      g.addColorStop(0.5, `hsla(${s.hue}, 95%, 70%, ${(a * 0.9).toFixed(2)})`);
+      g.addColorStop(1, `hsla(${s.hue}, 95%, 60%, 0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.ellipse(s.x, 0, rx, 7, 0, 0, TAU); ctx.fill();
+    }
+  }
+
+  // ---------- Weather: rain or snow that lands on the top edge of the keyboard ----------
+  const RAIN = 1, SNOW = 2, MAX_WEATHER = 2500;
+  const falling = [];  // { type, x, y, vx, vy, z, phase }  z is depth: 0.35 far, 1 near
+  const splash = [];   // { type, x, y, vx, vy, life, max, z }  type 'ring' is a rain ripple
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const weatherHue = x => S.hue + S.spread * x / W; // tint follows the keys below
+
+  function drawWeather(dt, now, keyTop) {
+    // Spawn. Switching modes lets what is already in the air finish falling.
+    const rate = S.weather === RAIN ? 520 : S.weather === SNOW ? 130 : 0;
+    for (let k = Math.floor(rate * S.wamount * dt * W / 1280 + Math.random()); k > 0 && falling.length < MAX_WEATHER; k--) {
+      const z = rnd(0.35, 1);
+      if (S.weather === RAIN) falling.push({ type: RAIN, x: rnd(-0.05, 1.1) * W, y: -30, vx: -70 * z, vy: rnd(1.3, 1.7) * H * z, z });
+      else falling.push({ type: SNOW, x: rnd(-0.05, 1.05) * W, y: -6, vx: rnd(-12, 12), vy: rnd(0.09, 0.15) * H * z, z, phase: rnd(0, TAU) });
+    }
+    if (!falling.length && !splash.length) return;
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+
+    for (let i = falling.length - 1; i >= 0; i--) {
+      const p = falling[i], snow = p.type === SNOW;
+      const vx = snow ? p.vx + Math.sin(now / 900 + p.phase) * 28 * p.z : p.vx;
+      p.x += vx * dt; p.y += p.vy * dt;
+      if (p.y >= keyTop) {
+        // Landed: rain kicks up droplets and a ripple, snow puffs and leaves a melting fleck
+        if (snow) {
+          for (let k = 2 + (Math.random() * 3 | 0); k > 0; k--)
+            splash.push({ type: SNOW, x: p.x, y: keyTop - 1, vx: rnd(-26, 26), vy: rnd(-34, -6), life: rnd(0.5, 1), z: p.z * 0.55 });
+          splash.push({ type: SNOW, x: p.x, y: keyTop - 1, vx: 0, vy: 0, life: rnd(1.2, 2.2), z: p.z });
+        } else {
+          for (let k = 2 + (Math.random() * 3 | 0); k > 0; k--)
+            splash.push({ type: RAIN, x: p.x, y: keyTop - 1, vx: rnd(-90, 90) * p.z, vy: rnd(-230, -70) * p.z, life: rnd(0.25, 0.5), z: p.z });
+          splash.push({ type: 'ring', x: p.x, y: keyTop, vx: 0, vy: 0, life: 0.35, z: p.z });
+        }
+        falling[i] = falling[falling.length - 1]; falling.pop();
+        continue;
+      }
+      const hue = weatherHue(p.x) | 0;
+      if (snow) {
+        const r = 0.6 + 2.2 * p.z;
+        ctx.fillStyle = `hsla(${hue}, 45%, 90%, ${(0.2 + 0.6 * p.z).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.fill();
+      } else {
+        const tail = 0.022 + 0.012 * p.z; // seconds of travel shown as a streak
+        ctx.strokeStyle = `hsla(${hue}, 60%, 80%, ${(0.12 + 0.4 * p.z).toFixed(2)})`;
+        ctx.lineWidth = 0.6 + 0.9 * p.z;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * tail, p.y - p.vy * tail); ctx.stroke();
+      }
+    }
+
+    for (let i = splash.length - 1; i >= 0; i--) {
+      const p = splash[i];
+      p.max ??= p.life;
+      p.life -= dt;
+      if (p.life <= 0 || p.y > keyTop) { splash[i] = splash[splash.length - 1]; splash.pop(); continue; }
+      const a = p.life / p.max, hue = weatherHue(p.x) | 0;
+      if (p.type === 'ring') {
+        const rx = (1 - a) * 16 * p.z + 2;
+        ctx.strokeStyle = `hsla(${hue}, 70%, 85%, ${(a * 0.7 * p.z).toFixed(2)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, rx * 0.3, 0, 0, TAU); ctx.stroke();
+        continue;
+      }
+      p.vy += (p.type === RAIN ? 900 : 55) * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      const r = p.type === RAIN ? 0.5 + 0.8 * p.z : 0.6 + 2.2 * p.z * (p.vx ? 1 : 0.5 + a * 0.5);
+      ctx.fillStyle = `hsla(${hue}, ${p.type === RAIN ? 70 : 45}%, 90%, ${(a * (0.25 + 0.6 * p.z)).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   // ---------- Render ----------
   let last = performance.now();
   function frame(now) {
@@ -259,20 +491,34 @@
     ctx.fillStyle = 'rgba(255,255,255,0.035)';
     for (let n = LOW; n <= HIGH; n++) if (n % 12 === 0) ctx.fillRect(keyGeo[n].x * ww, 0, 1, keyTop);
 
+    drawGeometry(dt, keyTop);
+    drawWeather(dt, now, keyTop);
+
     // Bars
-    ctx.save();
-    ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
-    ctx.globalCompositeOperation = 'lighter';
+    bctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    bctx.clearRect(0, 0, W, H);
+    bctx.save();
+    bctx.beginPath(); bctx.rect(0, 0, W, keyTop); bctx.clip();
+    bctx.globalCompositeOperation = 'lighter';
     for (let i = bars.length - 1; i >= 0; i--) {
       const b = bars[i], g = keyGeo[b.note];
       const yTop = keyTop - (now - b.start) / 1000 * pps;
       const yBot = b.end == null ? keyTop : keyTop - (now - b.end) / 1000 * pps;
-      if (yBot < -40) { bars.splice(i, 1); continue; }
+      if (yBot < -40) { if (b.smear) b.smear.end ??= now; bars.splice(i, 1); continue; }
       const kw = g.w * ww, w = Math.max(2, kw * S.width);
       const x = g.x * ww + (kw - w) / 2;
       const h = Math.max(yBot - yTop, 3);
       const r = Math.min(w / 2, h / 2) * S.round;
       const light = 48 + b.vel * 22;
+
+      // Wiggle: a wave runs along the bar so every part of it sways side to side as it climbs.
+      // It eases in from zero at the key, so the bar still leaves from the key it belongs to.
+      const amp = S.wiggle * ww * 1.3, phase = b.note * 0.9;
+      const off = amp > 0.05 ? y => {
+        const d = keyTop - y;
+        return amp * Math.min(1, d / (ww * 3)) * Math.sin(d * 0.028 + now * 0.005 + phase);
+      } : null;
+      const rect = (rx, ry, rw, rh, rr) => { off ? wavyRect(bctx, rx, ry, rw, rh, rr, off) : bctx.roundRect(rx, ry, rw, rh, rr); };
 
       // Shed particles along the bar; the rate tapers with height but never reaches zero
       if (S.shed > 0) {
@@ -283,9 +529,10 @@
           const taper = 0.12 + 0.88 * Math.exp(-rise * 3.2);
           const want = S.shed * amount() * 0.9 * dt * (0.4 + b.vel) * taper * Math.min(len, 400) / 120;
           for (let k = Math.floor(want + Math.random()); k > 0; k--) {
+            const sy = y0 + Math.random() * len;
             spawn(
-              x + Math.random() * w,
-              y0 + Math.random() * len,
+              x + Math.random() * w + (off ? off(sy) : 0),
+              sy,
               (Math.random() - 0.5) * 60 * S.pspread * S.pspeed,
               (Math.random() * 70 - 15) * S.pspeed,
               0.5 + Math.random() * 1.2,
@@ -296,25 +543,28 @@
         }
       }
 
-      ctx.shadowColor = colorOf(b.note, 60, 1);
-      ctx.shadowBlur = S.glow * 34 * DPR;
-      ctx.fillStyle = colorOf(b.note, light, 0.92);
-      ctx.beginPath(); ctx.roundRect(x, yTop, w, h, r); ctx.fill();
+      // Reaching the top of the screen: spread a little left and right, then fade once the tail is through
+      if (yTop <= 0) {
+        if (!b.smear) smears.push(b.smear = { w, hue: hueOf(b.note) | 0, start: now, end: null });
+        if (yBot > 0) b.smear.x = x + w / 2 + (off ? off(0) : 0);
+        else b.smear.end ??= now;
+      }
+
+      bctx.shadowColor = colorOf(b.note, 60, 1);
+      bctx.shadowBlur = S.glow * 34 * DPR;
+      bctx.fillStyle = colorOf(b.note, light, 0.92);
+      bctx.beginPath(); rect(x, yTop, w, h, r); bctx.fill();
 
       // Bright core
-      ctx.shadowBlur = 0;
+      bctx.shadowBlur = 0;
       const cw = w * 0.42;
-      ctx.fillStyle = `rgba(255,255,255,${0.16 + b.vel * 0.2})`;
-      ctx.beginPath(); ctx.roundRect(x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round); ctx.fill();
+      bctx.fillStyle = `rgba(255,255,255,${0.16 + b.vel * 0.2})`;
+      bctx.beginPath(); rect(x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round); bctx.fill();
     }
-    ctx.restore();
+    bctx.restore();
 
-    // Fade bars out toward the top
-    const fade = ctx.createLinearGradient(0, 0, 0, keyTop * 0.22);
-    fade.addColorStop(0, 'rgba(4,5,10,1)');
-    fade.addColorStop(1, 'rgba(4,5,10,0)');
-    ctx.fillStyle = fade;
-    ctx.fillRect(0, 0, W, keyTop * 0.22);
+    // Bars cover the backdrop instead of adding to it, so nothing shows through them
+    ctx.drawImage(barCanvas, 0, 0, W, H);
 
     // Impact glow + continuous sparks for held notes
     ctx.globalCompositeOperation = 'lighter';
@@ -348,6 +598,7 @@
       if (r > 1.1) { ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 6.283); ctx.fill(); }
       else ctx.fillRect(p.x - r, p.y - r, r * 2, r * 2);
     }
+    drawSmears(now);
     ctx.globalCompositeOperation = 'source-over';
 
     // Keyboard
