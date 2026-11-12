@@ -39,6 +39,11 @@
     backdrop-filter: blur(14px); max-height: calc(100vh - 74px); overflow-y: auto;
   }
   #panel[hidden] { display: none; }
+  details { margin-bottom: 10px; }
+  summary {
+    cursor: pointer; margin-bottom: 10px; color: #dfe3ee; font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase; font-size: 11px;
+  }
   .row { margin-bottom: 10px; }
   .row label { display: flex; justify-content: space-between; margin-bottom: 3px; color: #aab1c5; }
   .row output { color: #6f778d; font-variant-numeric: tabular-nums; }
@@ -65,24 +70,30 @@
   'use strict';
 
   // ---------- Settings ----------
-  const CONTROLS = [
-    { key: 'speed',     label: 'Speed',           min: 0.05, max: 1.5, step: 0.01, def: 0.35 },
-    { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8 },
-    { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
-    { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
-    { key: 'particles', label: 'Particles',       min: 0,    max: 1,   step: 0.01, def: 0.4 },
-    { key: 'pspeed',    label: 'Particle speed',  min: 0.2,  max: 3,   step: 0.01, def: 1 },
-    { key: 'pspread',   label: 'Particle spread', min: 0,    max: 3,   step: 0.01, def: 1 },
-    { key: 'shed',      label: 'Note shedding',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
-    { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
-    { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
-    { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
-    { key: 'gshape',    label: 'Geometry',        min: 0,    max: 6,   step: 1,    def: 0,
-      names: ['Star weave', 'Lotus', 'Lattice', 'Flower of Life', "Metatron's Cube", 'Mystic Rose', 'Torus'] },
-    { key: 'gspin',     label: 'Geometry spin',   min: 0,    max: 3,   step: 0.01, def: 0.4 },
-    { key: 'gopacity',  label: 'Geometry opacity', min: 0,   max: 1,   step: 0.01, def: 0.35 },
-    { key: 'gsat',      label: 'Geometry saturation', min: 0, max: 1,  step: 0.01, def: 0.8 },
+  const GROUPS = [
+    { title: 'Keyboard', controls: [
+      { key: 'speed',     label: 'Speed',           min: 0.05, max: 1.5, step: 0.01, def: 0.35 },
+      { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8 },
+      { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
+      { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
+      { key: 'particles', label: 'Particles',       min: 0,    max: 1,   step: 0.01, def: 0.4 },
+      { key: 'pspeed',    label: 'Particle speed',  min: 0.2,  max: 3,   step: 0.01, def: 1 },
+      { key: 'pspread',   label: 'Particle spread', min: 0,    max: 3,   step: 0.01, def: 1 },
+      { key: 'shed',      label: 'Note shedding',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
+      { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
+      { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
+      { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
+    ] },
+    { title: 'Background', controls: [
+      { key: 'gshape',    label: 'Shape',           min: 0,    max: 6,   step: 1,    def: 0,
+        names: ['Star weave', 'Lotus', 'Lattice', 'Flower of Life', "Metatron's Cube", 'Mystic Rose', 'Torus'] },
+      { key: 'gcomplex',  label: 'Complexity',      min: 1,    max: 10,  step: 1,    def: 5 },
+      { key: 'gspin',     label: 'Spin',            min: 0,    max: 3,   step: 0.01, def: 0.4 },
+      { key: 'gopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.35 },
+      { key: 'gsat',      label: 'Saturation',      min: 0,    max: 1,   step: 0.01, def: 0.8 },
+    ] },
   ];
+  const CONTROLS = GROUPS.flatMap(g => g.controls);
   const STORE = 'rach-viz-settings';
   const S = {};
   CONTROLS.forEach(c => S[c.key] = c.def);
@@ -91,17 +102,23 @@
 
   const rows = document.getElementById('rows');
   const inputs = {};
-  for (const c of CONTROLS) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML = `<label><span>${c.label}</span><output></output></label>
-      <input type="range" min="${c.min}" max="${c.max}" step="${c.step}">`;
-    const input = row.querySelector('input'), out = row.querySelector('output');
-    const show = () => out.textContent = c.names ? c.names[+input.value] : (+input.value).toFixed(c.step < 1 ? 2 : 0);
-    input.value = S[c.key]; show();
-    input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); });
-    inputs[c.key] = { input, show };
-    rows.appendChild(row);
+  for (const g of GROUPS) {
+    const section = document.createElement('details');
+    section.open = true;
+    section.innerHTML = `<summary>${g.title}</summary>`;
+    rows.appendChild(section);
+    for (const c of g.controls) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<label><span>${c.label}</span><output></output></label>
+        <input type="range" min="${c.min}" max="${c.max}" step="${c.step}">`;
+      const input = row.querySelector('input'), out = row.querySelector('output');
+      const show = () => out.textContent = c.names ? c.names[+input.value] : (+input.value).toFixed(c.step < 1 ? 2 : 0);
+      input.value = S[c.key]; show();
+      input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); });
+      inputs[c.key] = { input, show };
+      section.appendChild(row);
+    }
   }
   document.getElementById('reset').onclick = () => {
     for (const c of CONTROLS) { S[c.key] = c.def; inputs[c.key].input.value = c.def; inputs[c.key].show(); }
@@ -273,24 +290,50 @@
     return { lines };
   }
   const disc = (pts, r) => pts.map(p => [...p, r]);
-  const metatron = [[0, 0], ...ring(6, 0.4), ...ring(6, 0.8)];
+  // Hex lattice points within n steps of the centre, n steps spanning radius 1 - 1/(n+1)
+  function hexPts(n) {
+    const r = 1 / (n + 1), pts = [];
+    for (let q = -n; q <= n; q++) for (let k = -n; k <= n; k++) {
+      const x = (q + k / 2) * r, y = k * r * Math.sqrt(3) / 2;
+      if (Math.hypot(x, y) <= n * r + 1e-6) pts.push([x, y]);
+    }
+    return disc(pts, r);
+  }
+  const lerp = (a, b, t) => Math.round(a + (b - a) * t);
 
-  // Unit-radius shapes; each is drawn as nested counter-rotating layers
+  // Unit-radius shapes, each drawn as nested counter-rotating layers.
+  // t is the complexity slider, 0 (sparse) to 1 (dense).
   const SHAPES = [
-    { layers: 4, scale: 0.72, ...weave(6, 1, 0.6, 1, 14) },
-    { layers: 3, scale: 0.7,  ...weave(8, 1, 0.78, 1, 12) },
-    { layers: 4, scale: 0.74, ...weave(9, 0, 1, 2, 18) },
-    { layers: 2, scale: 0.5,  circles: [[0, 0, 1], ...disc([[0, 0], ...ring(6, 1 / 3), ...ring(6, 2 / 3), ...ring(6, Math.sqrt(3) / 3, TAU / 12)], 1 / 3)] },
-    { layers: 2, scale: 0.5,  lines: allPairs(metatron), circles: disc(metatron, 0.2) },
-    { layers: 3, scale: 0.62, lines: allPairs(ring(14, 1)), circles: [[0, 0, 1]] },
-    { layers: 3, scale: 0.62, circles: disc(ring(24, 0.5), 0.5) },
+    t => ({ layers: lerp(2, 6, t), scale: 0.72, ...weave(6, t < 0.15 ? 0 : t > 0.85 ? 2 : 1, 0.6, 1, lerp(5, 23, t)) }),
+    t => ({ layers: lerp(2, 5, t), scale: 0.7,  ...weave(lerp(5, 12, t), 1, 0.78, 1, lerp(5, 20, t)) }),
+    t => ({ layers: lerp(2, 5, t), scale: 0.74, ...weave(lerp(5, 13, t), 0, 1, 2, lerp(8, 24, t)) }),
+    t => ({ layers: lerp(1, 3, t), scale: 0.5,  circles: [[0, 0, 1], ...hexPts(lerp(1, 4, t))] }),
+    t => {
+      const u = t >= 0.3 ? 0.2 : 1 / 3; // circle radius; the sparse form has one ring, so it fills the space
+      const pts = [[0, 0], ...ring(6, 2 * u), ...(t >= 0.3 ? ring(6, 4 * u) : []), ...(t >= 0.75 ? ring(6, 2 * u * Math.sqrt(3), TAU / 12) : [])];
+      return { layers: lerp(1, 3, t), scale: 0.5, lines: allPairs(pts), circles: disc(pts, u) };
+    },
+    t => ({ layers: lerp(1, 5, t), scale: 0.62, lines: allPairs(ring(lerp(6, 22, t), 1)), circles: [[0, 0, 1]] }),
+    t => ({ layers: lerp(1, 5, t), scale: 0.62, circles: disc(ring(lerp(8, 48, t), 0.5), 0.5) }),
   ];
+  const shapeCache = new Map();
+  function currentShape() {
+    const key = S.gshape + ':' + S.gcomplex;
+    if (!shapeCache.has(key)) {
+      const shape = (SHAPES[S.gshape] || SHAPES[0])((S.gcomplex - 1) / 9);
+      // Dim dense shapes so their centres don't burn out to white
+      const strokes = ((shape.lines || []).length + (shape.circles || []).length) * shape.layers;
+      shape.dim = Math.min(1, Math.sqrt(900 / strokes));
+      shapeCache.set(key, shape);
+    }
+    return shapeCache.get(key);
+  }
 
   let geoT = 0;
   function drawGeometry(dt, keyTop) {
     geoT += dt * S.gspin;
     if (S.gopacity <= 0 || keyTop < 40) return;
-    const shape = SHAPES[S.gshape] || SHAPES[0];
+    const shape = currentShape();
     const R = Math.min(W * 0.48, keyTop * 0.54), cx = W / 2, cy = keyTop / 2;
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
@@ -306,10 +349,10 @@
       ctx.restore(); // the path keeps its transform; stroke width stays in screen pixels
 
       // Layers step through the same hue range as the keyboard, bass outside to treble inside
-      const hue = S.hue + S.spread * i / (shape.layers - 1), sat = S.gsat * 100;
-      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 60%, ${S.gopacity * 0.12})`;
+      const hue = S.hue + S.spread * (shape.layers > 1 ? i / (shape.layers - 1) : 0.5), sat = S.gsat * 100;
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 60%, ${S.gopacity * shape.dim * 0.12})`;
       ctx.lineWidth = 4; ctx.stroke();
-      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 66%, ${S.gopacity * 0.8})`;
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 66%, ${S.gopacity * shape.dim * 0.8})`;
       ctx.lineWidth = 1; ctx.stroke();
     }
     ctx.restore();
