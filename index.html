@@ -70,7 +70,10 @@
     { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8 },
     { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
     { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
-    { key: 'particles', label: 'Particles',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
+    { key: 'particles', label: 'Particles',       min: 0,    max: 1,   step: 0.01, def: 0.4 },
+    { key: 'pspeed',    label: 'Particle speed',  min: 0.2,  max: 3,   step: 0.01, def: 1 },
+    { key: 'pspread',   label: 'Particle spread', min: 0,    max: 3,   step: 0.01, def: 1 },
+    { key: 'shed',      label: 'Note shedding',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
     { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
     { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
     { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
@@ -129,7 +132,7 @@
   const bars = [];          // { note, vel, start, end|null }
   const particles = [];
   const flash = new Float32Array(128);
-  const MAX_PARTICLES = 1800;
+  const MAX_PARTICLES = 9000;
 
   const hueOf = n => (S.hue + S.spread * (n - LOW) / (HIGH - LOW)) % 360;
   const colorOf = (n, l = 62, a = 1) => `hsla(${hueOf(n)}, 95%, ${keyGeo[n].black ? l - 10 : l}%, ${a})`;
@@ -140,27 +143,33 @@
     const bar = { note: n, vel, start: performance.now(), end: null };
     held.set(n, bar); bars.push(bar);
     flash[n] = 1;
-    burst(n, vel, Math.round(24 * S.particles * (0.4 + vel)));
+    burst(n, vel, Math.round(amount() * 0.5 * (0.4 + vel)));
   }
   function noteOff(n) {
     const bar = held.get(n);
     if (bar) { bar.end = performance.now(); held.delete(n); }
   }
 
+  // Particle slider is curved so the top of its range gets wild
+  const amount = () => 12 * S.particles + 260 * S.particles ** 3;
+
+  function spawn(x, y, vx, vy, life, size, hue) {
+    if (particles.length < MAX_PARTICLES) particles.push({ x, y, vx, vy, life, max: life, size, hue });
+  }
+
   function burst(n, vel, count) {
     const g = keyGeo[n], ww = W / WHITES;
     const cx = (g.x + g.w / 2) * ww, y = H * (1 - S.keys);
-    for (let i = 0; i < count && particles.length < MAX_PARTICLES; i++) {
-      const life = 0.5 + Math.random() * 1.1;
-      particles.push({
-        x: cx + (Math.random() - 0.5) * g.w * ww * S.width,
+    for (let i = 0; i < count; i++) {
+      spawn(
+        cx + (Math.random() - 0.5) * g.w * ww * S.width,
         y,
-        vx: (Math.random() - 0.5) * 70,
-        vy: -(40 + Math.random() * 220 * (0.4 + vel)),
-        life, max: life,
-        size: 0.8 + Math.random() * 2,
-        hue: hueOf(n),
-      });
+        (Math.random() - 0.5) * 140 * S.pspread * S.pspeed,
+        -(40 + Math.random() * 260 * (0.4 + vel)) * S.pspeed,
+        0.5 + Math.random() * 1.1,
+        0.8 + Math.random() * 2,
+        hueOf(n) + (Math.random() - 0.5) * 24,
+      );
     }
   }
 
@@ -265,6 +274,28 @@
       const r = Math.min(w / 2, h / 2) * S.round;
       const light = 48 + b.vel * 22;
 
+      // Shed particles along the bar; the rate tapers with height but never reaches zero
+      if (S.shed > 0) {
+        const y0 = Math.max(yTop, 0), y1 = Math.min(yTop + h, keyTop);
+        const len = y1 - y0;
+        if (len > 0) {
+          const rise = (keyTop - (y0 + y1) / 2) / keyTop;
+          const taper = 0.12 + 0.88 * Math.exp(-rise * 3.2);
+          const want = S.shed * amount() * 0.9 * dt * (0.4 + b.vel) * taper * Math.min(len, 400) / 120;
+          for (let k = Math.floor(want + Math.random()); k > 0; k--) {
+            spawn(
+              x + Math.random() * w,
+              y0 + Math.random() * len,
+              (Math.random() - 0.5) * 60 * S.pspread * S.pspeed,
+              (Math.random() * 70 - 15) * S.pspeed,
+              0.5 + Math.random() * 1.2,
+              0.6 + Math.random() * 1.5,
+              hueOf(b.note) + (Math.random() - 0.5) * 24,
+            );
+          }
+        }
+      }
+
       ctx.shadowColor = colorOf(b.note, 60, 1);
       ctx.shadowBlur = S.glow * 34 * DPR;
       ctx.fillStyle = colorOf(b.note, light, 0.92);
@@ -300,7 +331,7 @@
       ctx.fillStyle = rg;
       ctx.fillRect(cx - rad, keyTop - rad, rad * 2, rad);
       flash[n] *= Math.pow(0.004, dt);
-      if (on && Math.random() < S.particles * 55 * dt) burst(n, held.get(n).vel * 0.6, 1);
+      if (on) burst(n, held.get(n).vel * 0.6, Math.floor(amount() * 5 * dt + Math.random()));
     }
 
     // Particles
@@ -308,12 +339,14 @@
       const p = particles[i];
       p.life -= dt;
       if (p.life <= 0) { particles[i] = particles[particles.length - 1]; particles.pop(); continue; }
-      p.vx += (Math.random() - 0.5) * 240 * dt;
+      p.vx += (Math.random() - 0.5) * 240 * S.pspread * S.pspeed * dt;
       p.vy *= Math.pow(0.35, dt);
       p.x += p.vx * dt; p.y += p.vy * dt;
       const a = p.life / p.max;
-      ctx.fillStyle = `hsla(${p.hue}, 100%, ${65 + a * 25}%, ${a})`;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.4 + a * 0.6), 0, 6.283); ctx.fill();
+      const r = p.size * (0.4 + a * 0.6);
+      ctx.fillStyle = `hsla(${p.hue | 0}, 100%, ${(65 + a * 25) | 0}%, ${a.toFixed(2)})`;
+      if (r > 1.1) { ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 6.283); ctx.fill(); }
+      else ctx.fillRect(p.x - r, p.y - r, r * 2, r * 2);
     }
     ctx.globalCompositeOperation = 'source-over';
 
