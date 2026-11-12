@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rachmaninoff Visualizer</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #05060a; overflow: hidden; }
+  body { font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: #dfe3ee; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  body.idle { cursor: none; }
+
+  .ui { transition: opacity .4s; }
+  body.idle .ui { opacity: 0; pointer-events: none; }
+
+  #bar {
+    position: fixed; top: 14px; right: 14px; display: flex; gap: 8px; align-items: center;
+  }
+  #status {
+    display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px;
+    background: rgba(18, 20, 30, .6); border: 1px solid rgba(255, 255, 255, .08);
+    backdrop-filter: blur(14px); max-width: 46vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #666; }
+  #dot.on { background: #4ade80; box-shadow: 0 0 10px #4ade80; }
+  #dot.err { background: #f87171; }
+
+  button {
+    font: inherit; color: inherit; cursor: pointer; padding: 7px 12px; border-radius: 999px;
+    background: rgba(18, 20, 30, .6); border: 1px solid rgba(255, 255, 255, .08); backdrop-filter: blur(14px);
+  }
+  button:hover { background: rgba(40, 44, 62, .8); }
+
+  #panel {
+    position: fixed; top: 60px; right: 14px; width: 250px; padding: 14px 16px 12px;
+    border-radius: 16px; background: rgba(18, 20, 30, .6); border: 1px solid rgba(255, 255, 255, .08);
+    backdrop-filter: blur(14px);
+  }
+  #panel[hidden] { display: none; }
+  .row { margin-bottom: 10px; }
+  .row label { display: flex; justify-content: space-between; margin-bottom: 3px; color: #aab1c5; }
+  .row output { color: #6f778d; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; margin: 0; accent-color: #8ea2ff; }
+  #reset { width: 100%; margin-top: 4px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="bar" class="ui">
+  <div id="status"><span id="dot"></span><span id="statusText">Looking for MIDI…</span></div>
+  <button id="toggle" title="Controls (H)">Controls</button>
+  <button id="fs" title="Fullscreen (F)">Fullscreen</button>
+</div>
+
+<div id="panel" class="ui">
+  <div id="rows"></div>
+  <button id="reset">Reset</button>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- Settings ----------
+  const CONTROLS = [
+    { key: 'speed',     label: 'Speed',           min: 0.05, max: 1.5, step: 0.01, def: 0.35 },
+    { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8 },
+    { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
+    { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
+    { key: 'particles', label: 'Particles',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
+    { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
+    { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
+    { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
+  ];
+  const STORE = 'rach-viz-settings';
+  const S = {};
+  CONTROLS.forEach(c => S[c.key] = c.def);
+  try { Object.assign(S, JSON.parse(localStorage.getItem(STORE) || '{}')); } catch {}
+  const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch {} };
+
+  const rows = document.getElementById('rows');
+  const inputs = {};
+  for (const c of CONTROLS) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<label><span>${c.label}</span><output></output></label>
+      <input type="range" min="${c.min}" max="${c.max}" step="${c.step}">`;
+    const input = row.querySelector('input'), out = row.querySelector('output');
+    const show = () => out.textContent = (+input.value).toFixed(c.step < 1 ? 2 : 0);
+    input.value = S[c.key]; show();
+    input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); });
+    inputs[c.key] = { input, show };
+    rows.appendChild(row);
+  }
+  document.getElementById('reset').onclick = () => {
+    for (const c of CONTROLS) { S[c.key] = c.def; inputs[c.key].input.value = c.def; inputs[c.key].show(); }
+    save();
+  };
+
+  // ---------- Keyboard geometry ----------
+  const LOW = 21, HIGH = 108, WHITES = 52;
+  const isBlack = n => [1, 3, 6, 8, 10].includes(n % 12);
+  const keyGeo = []; // per note: { x, w, black } in units of white-key widths
+  {
+    let wi = 0;
+    for (let n = LOW; n <= HIGH; n++) {
+      if (isBlack(n)) keyGeo[n] = { x: wi - 0.3, w: 0.6, black: true };
+      else { keyGeo[n] = { x: wi, w: 1, black: false }; wi++; }
+    }
+  }
+
+  // ---------- Canvas ----------
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  // ---------- Note state ----------
+  const held = new Map();   // note -> bar
+  const bars = [];          // { note, vel, start, end|null }
+  const particles = [];
+  const flash = new Float32Array(128);
+  const MAX_PARTICLES = 1800;
+
+  const hueOf = n => (S.hue + S.spread * (n - LOW) / (HIGH - LOW)) % 360;
+  const colorOf = (n, l = 62, a = 1) => `hsla(${hueOf(n)}, 95%, ${keyGeo[n].black ? l - 10 : l}%, ${a})`;
+
+  function noteOn(n, vel = 0.8) {
+    if (n < LOW || n > HIGH) return;
+    if (held.has(n)) noteOff(n);
+    const bar = { note: n, vel, start: performance.now(), end: null };
+    held.set(n, bar); bars.push(bar);
+    flash[n] = 1;
+    burst(n, vel, Math.round(24 * S.particles * (0.4 + vel)));
+  }
+  function noteOff(n) {
+    const bar = held.get(n);
+    if (bar) { bar.end = performance.now(); held.delete(n); }
+  }
+
+  function burst(n, vel, count) {
+    const g = keyGeo[n], ww = W / WHITES;
+    const cx = (g.x + g.w / 2) * ww, y = H * (1 - S.keys);
+    for (let i = 0; i < count && particles.length < MAX_PARTICLES; i++) {
+      const life = 0.5 + Math.random() * 1.1;
+      particles.push({
+        x: cx + (Math.random() - 0.5) * g.w * ww * S.width,
+        y,
+        vx: (Math.random() - 0.5) * 70,
+        vy: -(40 + Math.random() * 220 * (0.4 + vel)),
+        life, max: life,
+        size: 0.8 + Math.random() * 2,
+        hue: hueOf(n),
+      });
+    }
+  }
+
+  // ---------- MIDI ----------
+  const dot = document.getElementById('dot'), statusText = document.getElementById('statusText');
+  function setStatus(text, cls) { statusText.textContent = text; dot.className = cls || ''; }
+
+  function onMidi(e) {
+    const [st, d1, d2] = e.data;
+    const cmd = st & 0xf0;
+    if (cmd === 0x90 && d2 > 0) noteOn(d1, d2 / 127);
+    else if (cmd === 0x80 || (cmd === 0x90 && d2 === 0)) noteOff(d1);
+  }
+  function hookInputs(access) {
+    const names = [];
+    for (const input of access.inputs.values()) {
+      input.onmidimessage = onMidi;
+      if (input.state === 'connected') names.push(input.name);
+    }
+    if (names.length) setStatus(names.join(', '), 'on');
+    else setStatus('No MIDI device. Plug one in.', '');
+  }
+  let midiStarted = false;
+  function startMidi() {
+    if (midiStarted) return;
+    if (!navigator.requestMIDIAccess) { setStatus('Web MIDI unsupported. Use Chrome or Edge.', 'err'); return; }
+    midiStarted = true;
+    navigator.requestMIDIAccess().then(access => {
+      hookInputs(access);
+      access.onstatechange = () => hookInputs(access);
+    }).catch(() => {
+      midiStarted = false;
+      setStatus('MIDI blocked. Allow access, then click anywhere.', 'err');
+    });
+  }
+  startMidi();
+  addEventListener('pointerdown', startMidi);
+
+  // ---------- Pointer play (for testing without a device) ----------
+  const pointerNotes = new Map();
+  function noteAt(px, py) {
+    const kh = H * S.keys, top = H - kh;
+    if (py < top) return null;
+    const u = px / (W / WHITES);
+    if (py < top + kh * 0.63) {
+      for (let n = LOW; n <= HIGH; n++) {
+        const g = keyGeo[n];
+        if (g.black && u >= g.x && u < g.x + g.w) return n;
+      }
+    }
+    for (let n = LOW; n <= HIGH; n++) {
+      const g = keyGeo[n];
+      if (!g.black && u >= g.x && u < g.x + 1) return n;
+    }
+    return null;
+  }
+  canvas.addEventListener('pointerdown', e => {
+    const n = noteAt(e.clientX, e.clientY);
+    if (n != null) { pointerNotes.set(e.pointerId, n); noteOn(n, 0.8); canvas.setPointerCapture(e.pointerId); }
+  });
+  const pointerUp = e => {
+    const n = pointerNotes.get(e.pointerId);
+    if (n != null) { noteOff(n); pointerNotes.delete(e.pointerId); }
+  };
+  canvas.addEventListener('pointerup', pointerUp);
+  canvas.addEventListener('pointercancel', pointerUp);
+
+  // ---------- Render ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    const ww = W / WHITES;
+    const kh = H * S.keys, keyTop = H - kh;
+    const pps = S.speed * H; // pixels per second
+
+    // Background
+    const bg = ctx.createLinearGradient(0, 0, 0, keyTop);
+    bg.addColorStop(0, '#04050a');
+    bg.addColorStop(1, `hsl(${S.hue + S.spread / 2}, 35%, 7%)`);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Octave guide lines
+    ctx.fillStyle = 'rgba(255,255,255,0.035)';
+    for (let n = LOW; n <= HIGH; n++) if (n % 12 === 0) ctx.fillRect(keyGeo[n].x * ww, 0, 1, keyTop);
+
+    // Bars
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = bars.length - 1; i >= 0; i--) {
+      const b = bars[i], g = keyGeo[b.note];
+      const yTop = keyTop - (now - b.start) / 1000 * pps;
+      const yBot = b.end == null ? keyTop : keyTop - (now - b.end) / 1000 * pps;
+      if (yBot < -40) { bars.splice(i, 1); continue; }
+      const kw = g.w * ww, w = Math.max(2, kw * S.width);
+      const x = g.x * ww + (kw - w) / 2;
+      const h = Math.max(yBot - yTop, 3);
+      const r = Math.min(w / 2, h / 2) * S.round;
+      const light = 48 + b.vel * 22;
+
+      ctx.shadowColor = colorOf(b.note, 60, 1);
+      ctx.shadowBlur = S.glow * 34 * DPR;
+      ctx.fillStyle = colorOf(b.note, light, 0.92);
+      ctx.beginPath(); ctx.roundRect(x, yTop, w, h, r); ctx.fill();
+
+      // Bright core
+      ctx.shadowBlur = 0;
+      const cw = w * 0.42;
+      ctx.fillStyle = `rgba(255,255,255,${0.16 + b.vel * 0.2})`;
+      ctx.beginPath(); ctx.roundRect(x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round); ctx.fill();
+    }
+    ctx.restore();
+
+    // Fade bars out toward the top
+    const fade = ctx.createLinearGradient(0, 0, 0, keyTop * 0.22);
+    fade.addColorStop(0, 'rgba(4,5,10,1)');
+    fade.addColorStop(1, 'rgba(4,5,10,0)');
+    ctx.fillStyle = fade;
+    ctx.fillRect(0, 0, W, keyTop * 0.22);
+
+    // Impact glow + continuous sparks for held notes
+    ctx.globalCompositeOperation = 'lighter';
+    for (let n = LOW; n <= HIGH; n++) {
+      const on = held.has(n);
+      if (!on && flash[n] < 0.01) continue;
+      const g = keyGeo[n], cx = (g.x + g.w / 2) * ww;
+      const power = (on ? 0.55 : 0) + flash[n] * 0.6;
+      const rad = ww * (2.2 + flash[n] * 2.5) * (0.4 + S.glow);
+      const rg = ctx.createRadialGradient(cx, keyTop, 0, cx, keyTop, rad);
+      rg.addColorStop(0, `hsla(${hueOf(n)}, 100%, 78%, ${power})`);
+      rg.addColorStop(0.3, `hsla(${hueOf(n)}, 100%, 60%, ${power * 0.35})`);
+      rg.addColorStop(1, 'hsla(0,0%,0%,0)');
+      ctx.fillStyle = rg;
+      ctx.fillRect(cx - rad, keyTop - rad, rad * 2, rad);
+      flash[n] *= Math.pow(0.004, dt);
+      if (on && Math.random() < S.particles * 55 * dt) burst(n, held.get(n).vel * 0.6, 1);
+    }
+
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life -= dt;
+      if (p.life <= 0) { particles[i] = particles[particles.length - 1]; particles.pop(); continue; }
+      p.vx += (Math.random() - 0.5) * 240 * dt;
+      p.vy *= Math.pow(0.35, dt);
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      const a = p.life / p.max;
+      ctx.fillStyle = `hsla(${p.hue}, 100%, ${65 + a * 25}%, ${a})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.4 + a * 0.6), 0, 6.283); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Keyboard
+    if (kh > 1) {
+      for (let n = LOW; n <= HIGH; n++) {
+        const g = keyGeo[n];
+        if (g.black) continue;
+        const x = g.x * ww;
+        const kg = ctx.createLinearGradient(0, keyTop, 0, H);
+        if (held.has(n)) {
+          kg.addColorStop(0, colorOf(n, 60)); kg.addColorStop(1, colorOf(n, 82));
+        } else {
+          kg.addColorStop(0, '#c9ccd6'); kg.addColorStop(0.12, '#f3f4f8'); kg.addColorStop(1, '#ffffff');
+        }
+        ctx.fillStyle = kg;
+        ctx.beginPath(); ctx.roundRect(x + 0.5, keyTop, ww - 1, kh, [0, 0, ww * 0.12, ww * 0.12]); ctx.fill();
+      }
+      const bh = kh * 0.63;
+      for (let n = LOW; n <= HIGH; n++) {
+        const g = keyGeo[n];
+        if (!g.black) continue;
+        const x = g.x * ww, w = g.w * ww;
+        const kg = ctx.createLinearGradient(0, keyTop, 0, keyTop + bh);
+        if (held.has(n)) {
+          kg.addColorStop(0, colorOf(n, 50)); kg.addColorStop(1, colorOf(n, 68));
+        } else {
+          kg.addColorStop(0, '#0b0c11'); kg.addColorStop(0.85, '#23252f'); kg.addColorStop(1, '#0b0c11');
+        }
+        ctx.fillStyle = kg;
+        ctx.beginPath(); ctx.roundRect(x, keyTop, w, bh, [0, 0, w * 0.15, w * 0.15]); ctx.fill();
+      }
+      // Felt strip
+      const strip = ctx.createLinearGradient(0, 0, W, 0);
+      strip.addColorStop(0, `hsl(${S.hue}, 90%, 55%)`);
+      strip.addColorStop(1, `hsl(${S.hue + S.spread}, 90%, 55%)`);
+      ctx.fillStyle = strip;
+      ctx.shadowColor = `hsl(${S.hue + S.spread / 2}, 100%, 60%)`;
+      ctx.shadowBlur = 12 * S.glow * DPR;
+      ctx.fillRect(0, keyTop - 2, W, 2);
+      ctx.shadowBlur = 0;
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ---------- UI chrome ----------
+  const panel = document.getElementById('panel');
+  const togglePanel = () => { panel.hidden = !panel.hidden; };
+  const toggleFs = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(() => {});
+  };
+  document.getElementById('toggle').onclick = togglePanel;
+  document.getElementById('fs').onclick = toggleFs;
+  addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'f' || e.key === 'F') toggleFs();
+    if (e.key === 'h' || e.key === 'H') togglePanel();
+  });
+  canvas.addEventListener('dblclick', e => { if (noteAt(e.clientX, e.clientY) == null) toggleFs(); });
+
+  // Hide the UI and cursor when the mouse rests
+  let idleTimer;
+  const wake = () => {
+    document.body.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (!document.querySelector('.ui:hover')) document.body.classList.add('idle');
+    }, 3000);
+  };
+  addEventListener('pointermove', wake);
+  addEventListener('pointerdown', wake);
+  wake();
+
+  // Keep the screen awake while playing
+  const lock = () => navigator.wakeLock?.request('screen').catch(() => {});
+  lock();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') lock(); });
+
+  window.viz = { noteOn, noteOff };
+})();
+</script>
+</body>
+</html>
