@@ -36,7 +36,7 @@
   #panel {
     position: fixed; top: 60px; right: 14px; width: 250px; padding: 14px 16px 12px;
     border-radius: 16px; background: rgba(18, 20, 30, .6); border: 1px solid rgba(255, 255, 255, .08);
-    backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px); max-height: calc(100vh - 74px); overflow-y: auto;
   }
   #panel[hidden] { display: none; }
   .row { margin-bottom: 10px; }
@@ -77,6 +77,11 @@
     { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
     { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
     { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
+    { key: 'gshape',    label: 'Geometry',        min: 0,    max: 6,   step: 1,    def: 0,
+      names: ['Star weave', 'Lotus', 'Lattice', 'Flower of Life', "Metatron's Cube", 'Mystic Rose', 'Torus'] },
+    { key: 'gspin',     label: 'Geometry spin',   min: 0,    max: 3,   step: 0.01, def: 0.4 },
+    { key: 'gopacity',  label: 'Geometry opacity', min: 0,   max: 1,   step: 0.01, def: 0.35 },
+    { key: 'gsat',      label: 'Geometry saturation', min: 0, max: 1,  step: 0.01, def: 0.8 },
   ];
   const STORE = 'rach-viz-settings';
   const S = {};
@@ -92,7 +97,7 @@
     row.innerHTML = `<label><span>${c.label}</span><output></output></label>
       <input type="range" min="${c.min}" max="${c.max}" step="${c.step}">`;
     const input = row.querySelector('input'), out = row.querySelector('output');
-    const show = () => out.textContent = (+input.value).toFixed(c.step < 1 ? 2 : 0);
+    const show = () => out.textContent = c.names ? c.names[+input.value] : (+input.value).toFixed(c.step < 1 ? 2 : 0);
     input.value = S[c.key]; show();
     input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); });
     inputs[c.key] = { input, show };
@@ -118,11 +123,15 @@
   // ---------- Canvas ----------
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
+  // Bars render to their own layer so their top fade leaves the backdrop untouched
+  const barCanvas = document.createElement('canvas');
+  const bctx = barCanvas.getContext('2d');
   let W = 0, H = 0, DPR = 1;
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth; H = window.innerHeight;
-    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+    barCanvas.width = canvas.width = Math.round(W * DPR);
+    barCanvas.height = canvas.height = Math.round(H * DPR);
   }
   addEventListener('resize', resize);
   resize();
@@ -237,6 +246,75 @@
   canvas.addEventListener('pointerup', pointerUp);
   canvas.addEventListener('pointercancel', pointerUp);
 
+  // ---------- Sacred geometry backdrop ----------
+  const TAU = Math.PI * 2, GOLDEN = Math.PI * (3 - Math.sqrt(5));
+  const ring = (n, r, off = 0) =>
+    Array.from({ length: n }, (_, i) => [Math.cos(off + TAU * i / n) * r, Math.sin(off + TAU * i / n) * r]);
+  const allPairs = pts => pts.flatMap((a, i) => pts.slice(i + 1).map(b => [...a, ...b]));
+
+  // String-art star: spokes with shorter branch generations between them, and
+  // straight threads stitched from each spoke across to a neighbour.
+  function weave(axes, depth, bscale, skip, d) {
+    let spokes = Array.from({ length: axes }, (_, i) => ({ a: -Math.PI / 2 + TAU * i / axes, len: 1 }));
+    for (let g = 1; g <= depth; g++) {
+      const half = Math.PI / spokes.length;
+      spokes = spokes.flatMap(s => [s, { a: s.a + half, len: bscale ** g }]);
+    }
+    const tips = spokes.map(s => [Math.cos(s.a) * s.len, Math.sin(s.a) * s.len]);
+    const lines = [];
+    tips.forEach((A, i) => {
+      const B = tips[(i + skip) % tips.length];
+      lines.push([0, 0, ...A]);
+      for (let j = 0; j < d; j++) {
+        const fa = (d - j) / d, fb = (j + 1) / d;
+        lines.push([A[0] * fa, A[1] * fa, B[0] * fb, B[1] * fb]);
+      }
+    });
+    return { lines };
+  }
+  const disc = (pts, r) => pts.map(p => [...p, r]);
+  const metatron = [[0, 0], ...ring(6, 0.4), ...ring(6, 0.8)];
+
+  // Unit-radius shapes; each is drawn as nested counter-rotating layers
+  const SHAPES = [
+    { layers: 4, scale: 0.72, ...weave(6, 1, 0.6, 1, 14) },
+    { layers: 3, scale: 0.7,  ...weave(8, 1, 0.78, 1, 12) },
+    { layers: 4, scale: 0.74, ...weave(9, 0, 1, 2, 18) },
+    { layers: 2, scale: 0.5,  circles: [[0, 0, 1], ...disc([[0, 0], ...ring(6, 1 / 3), ...ring(6, 2 / 3), ...ring(6, Math.sqrt(3) / 3, TAU / 12)], 1 / 3)] },
+    { layers: 2, scale: 0.5,  lines: allPairs(metatron), circles: disc(metatron, 0.2) },
+    { layers: 3, scale: 0.62, lines: allPairs(ring(14, 1)), circles: [[0, 0, 1]] },
+    { layers: 3, scale: 0.62, circles: disc(ring(24, 0.5), 0.5) },
+  ];
+
+  let geoT = 0;
+  function drawGeometry(dt, keyTop) {
+    geoT += dt * S.gspin;
+    if (S.gopacity <= 0 || keyTop < 40) return;
+    const shape = SHAPES[S.gshape] || SHAPES[0];
+    const R = Math.min(W * 0.48, keyTop * 0.54), cx = W / 2, cy = keyTop / 2;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < shape.layers; i++) {
+      const rot = i * GOLDEN + geoT * 0.25 * (1 + 0.23 * i) * (i % 2 ? -1 : 1);
+      const s = R * shape.scale ** i * (1 + 0.03 * Math.sin(geoT * 0.9 + i * 1.7));
+      ctx.save();
+      ctx.translate(cx, cy); ctx.rotate(rot); ctx.scale(s, s);
+      ctx.beginPath();
+      for (const l of shape.lines || []) { ctx.moveTo(l[0], l[1]); ctx.lineTo(l[2], l[3]); }
+      for (const c of shape.circles || []) { ctx.moveTo(c[0] + c[2], c[1]); ctx.arc(c[0], c[1], c[2], 0, TAU); }
+      ctx.restore(); // the path keeps its transform; stroke width stays in screen pixels
+
+      // Layers step through the same hue range as the keyboard, bass outside to treble inside
+      const hue = S.hue + S.spread * i / (shape.layers - 1), sat = S.gsat * 100;
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 60%, ${S.gopacity * 0.12})`;
+      ctx.lineWidth = 4; ctx.stroke();
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 66%, ${S.gopacity * 0.8})`;
+      ctx.lineWidth = 1; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // ---------- Render ----------
   let last = performance.now();
   function frame(now) {
@@ -259,10 +337,14 @@
     ctx.fillStyle = 'rgba(255,255,255,0.035)';
     for (let n = LOW; n <= HIGH; n++) if (n % 12 === 0) ctx.fillRect(keyGeo[n].x * ww, 0, 1, keyTop);
 
+    drawGeometry(dt, keyTop);
+
     // Bars
-    ctx.save();
-    ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
-    ctx.globalCompositeOperation = 'lighter';
+    bctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    bctx.clearRect(0, 0, W, H);
+    bctx.save();
+    bctx.beginPath(); bctx.rect(0, 0, W, keyTop); bctx.clip();
+    bctx.globalCompositeOperation = 'lighter';
     for (let i = bars.length - 1; i >= 0; i--) {
       const b = bars[i], g = keyGeo[b.note];
       const yTop = keyTop - (now - b.start) / 1000 * pps;
@@ -296,25 +378,29 @@
         }
       }
 
-      ctx.shadowColor = colorOf(b.note, 60, 1);
-      ctx.shadowBlur = S.glow * 34 * DPR;
-      ctx.fillStyle = colorOf(b.note, light, 0.92);
-      ctx.beginPath(); ctx.roundRect(x, yTop, w, h, r); ctx.fill();
+      bctx.shadowColor = colorOf(b.note, 60, 1);
+      bctx.shadowBlur = S.glow * 34 * DPR;
+      bctx.fillStyle = colorOf(b.note, light, 0.92);
+      bctx.beginPath(); bctx.roundRect(x, yTop, w, h, r); bctx.fill();
 
       // Bright core
-      ctx.shadowBlur = 0;
+      bctx.shadowBlur = 0;
       const cw = w * 0.42;
-      ctx.fillStyle = `rgba(255,255,255,${0.16 + b.vel * 0.2})`;
-      ctx.beginPath(); ctx.roundRect(x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round); ctx.fill();
+      bctx.fillStyle = `rgba(255,255,255,${0.16 + b.vel * 0.2})`;
+      bctx.beginPath(); bctx.roundRect(x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round); bctx.fill();
     }
-    ctx.restore();
+    bctx.restore();
 
-    // Fade bars out toward the top
-    const fade = ctx.createLinearGradient(0, 0, 0, keyTop * 0.22);
-    fade.addColorStop(0, 'rgba(4,5,10,1)');
-    fade.addColorStop(1, 'rgba(4,5,10,0)');
-    ctx.fillStyle = fade;
-    ctx.fillRect(0, 0, W, keyTop * 0.22);
+    // Fade bars out toward the top, then lay them over the backdrop
+    const fade = bctx.createLinearGradient(0, 0, 0, keyTop * 0.22);
+    fade.addColorStop(0, 'rgba(0,0,0,1)');
+    fade.addColorStop(1, 'rgba(0,0,0,0)');
+    bctx.globalCompositeOperation = 'destination-out';
+    bctx.fillStyle = fade;
+    bctx.fillRect(0, 0, W, keyTop * 0.22);
+    bctx.globalCompositeOperation = 'source-over';
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(barCanvas, 0, 0, W, H);
 
     // Impact glow + continuous sparks for held notes
     ctx.globalCompositeOperation = 'lighter';
