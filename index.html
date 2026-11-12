@@ -75,6 +75,7 @@
       { key: 'speed',     label: 'Speed',           min: 0.05, max: 1.5, step: 0.01, def: 0.35 },
       { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8 },
       { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
+      { key: 'wiggle',    label: 'Wiggle',          min: 0,    max: 1,   step: 0.01, def: 0 },
       { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
       { key: 'particles', label: 'Particles',       min: 0,    max: 1,   step: 0.01, def: 0.4 },
       { key: 'pspeed',    label: 'Particle speed',  min: 0.2,  max: 3,   step: 0.01, def: 1 },
@@ -360,6 +361,22 @@
     ctx.restore();
   }
 
+  // Rounded bar whose sides follow off(y), a sideways shift that varies with height
+  function wavyRect(c, x, y, w, h, r, off) {
+    r = Math.min(r, w / 2, h / 2);
+    const y1 = y + h, a = Math.max(y + r, -20), b = Math.min(y1 - r, H + 20);
+    c.moveTo(x + off(y1 - r), y1 - r);
+    for (let yy = b; yy > a; yy -= 5) c.lineTo(x + off(yy), yy);
+    c.lineTo(x + off(y + r), y + r);
+    c.arcTo(x + off(y), y, x + w / 2 + off(y), y, r);
+    c.arcTo(x + w + off(y), y, x + w + off(y + r), y + r, r);
+    for (let yy = a; yy < b; yy += 5) c.lineTo(x + w + off(yy), yy);
+    c.lineTo(x + w + off(y1 - r), y1 - r);
+    c.arcTo(x + w + off(y1), y1, x + w / 2 + off(y1), y1, r);
+    c.arcTo(x + off(y1), y1, x + off(y1 - r), y1 - r, r);
+    c.closePath();
+  }
+
   // ---------- Weather: rain or snow that lands on the top edge of the keyboard ----------
   const RAIN = 1, SNOW = 2, MAX_WEATHER = 2500;
   const falling = [];  // { type, x, y, vx, vy, z, phase }  z is depth: 0.35 far, 1 near
@@ -477,6 +494,11 @@
       const r = Math.min(w / 2, h / 2) * S.round;
       const light = 48 + b.vel * 22;
 
+      // Wiggle: each slice keeps the sideways sway it had when it left the key, so the wave rides up with the bar
+      const amp = S.wiggle * ww * 1.3, phase = b.note * 0.9;
+      const off = amp > 0.05 ? y => amp * Math.sin((now / 1000 - (keyTop - y) / pps) * 9 + phase) : null;
+      const rect = (rx, ry, rw, rh, rr) => { off ? wavyRect(bctx, rx, ry, rw, rh, rr, off) : bctx.roundRect(rx, ry, rw, rh, rr); };
+
       // Shed particles along the bar; the rate tapers with height but never reaches zero
       if (S.shed > 0) {
         const y0 = Math.max(yTop, 0), y1 = Math.min(yTop + h, keyTop);
@@ -486,9 +508,10 @@
           const taper = 0.12 + 0.88 * Math.exp(-rise * 3.2);
           const want = S.shed * amount() * 0.9 * dt * (0.4 + b.vel) * taper * Math.min(len, 400) / 120;
           for (let k = Math.floor(want + Math.random()); k > 0; k--) {
+            const sy = y0 + Math.random() * len;
             spawn(
-              x + Math.random() * w,
-              y0 + Math.random() * len,
+              x + Math.random() * w + (off ? off(sy) : 0),
+              sy,
               (Math.random() - 0.5) * 60 * S.pspread * S.pspeed,
               (Math.random() * 70 - 15) * S.pspeed,
               0.5 + Math.random() * 1.2,
@@ -502,13 +525,13 @@
       bctx.shadowColor = colorOf(b.note, 60, 1);
       bctx.shadowBlur = S.glow * 34 * DPR;
       bctx.fillStyle = colorOf(b.note, light, 0.92);
-      bctx.beginPath(); bctx.roundRect(x, yTop, w, h, r); bctx.fill();
+      bctx.beginPath(); rect(x, yTop, w, h, r); bctx.fill();
 
       // Bright core
       bctx.shadowBlur = 0;
       const cw = w * 0.42;
       bctx.fillStyle = `rgba(255,255,255,${0.16 + b.vel * 0.2})`;
-      bctx.beginPath(); bctx.roundRect(x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round); bctx.fill();
+      bctx.beginPath(); rect(x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round); bctx.fill();
     }
     bctx.restore();
 
