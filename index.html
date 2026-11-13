@@ -34,7 +34,7 @@
   button:hover { background: rgba(40, 44, 62, .92); }
 
   #panel {
-    position: fixed; top: 60px; right: 14px; width: min(700px, calc(100vw - 28px)); padding: 14px 16px 12px;
+    position: fixed; top: 60px; right: 14px; width: min(980px, calc(100vw - 28px)); padding: 14px 16px 12px;
     border-radius: 16px; background: rgba(18, 20, 30, .85); border: 1px solid rgba(255, 255, 255, .08);
     max-height: calc(100vh - 74px); overflow-y: auto;
     /* One column per section; they wrap onto fewer columns when the window is narrow */
@@ -51,6 +51,17 @@
   .row label { display: flex; justify-content: space-between; margin-bottom: 3px; color: #aab1c5; }
   .row output { color: #6f778d; font-variant-numeric: tabular-nums; }
   input[type=range] { width: 100%; margin: 0; accent-color: #8ea2ff; }
+  /* A choice with many named options: every option is a chip, so all of them can be read at once */
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+  .chips label { position: relative; cursor: pointer; }
+  .chips input { position: absolute; opacity: 0; pointer-events: none; }
+  .chips span {
+    display: block; padding: 4px 10px; border-radius: 999px; font-size: 12px; color: #aab1c5;
+    background: rgba(0, 0, 0, .3); border: 1px solid rgba(255, 255, 255, .08);
+  }
+  .chips label:hover span { background: rgba(40, 44, 62, .92); }
+  .chips input:checked + span { background: #8ea2ff; border-color: #8ea2ff; color: #0b0d16; }
+  .chips input:focus-visible + span { outline: 2px solid #8ea2ff; outline-offset: 2px; }
   .pair { display: flex; gap: 6px; margin-bottom: 6px; }
   .pair > * { flex: 1; min-width: 0; }
   .pair > #load { flex: none; }
@@ -101,30 +112,48 @@
       { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
       { key: 'wiggle',    label: 'Wiggle',          min: 0,    max: 1,   step: 0.01, def: 0 },
       { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
-      { key: 'particles', label: 'Particles',       min: 0,    max: 1,   step: 0.01, def: 0.4 },
-      { key: 'pspeed',    label: 'Particle speed',  min: 0.2,  max: 3,   step: 0.01, def: 1 },
-      { key: 'pspread',   label: 'Particle spread', min: 0,    max: 3,   step: 0.01, def: 1 },
-      { key: 'shed',      label: 'Note shedding',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
+      { key: 'vsens',     label: 'Velocity sensitivity', min: 0, max: 1, step: 0.01, def: 0.5 },
       { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
       { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
+      { key: 'cmode',     label: 'Color by',        min: 0,    max: 2,   step: 1,    def: 0, names: ['Pitch', 'Pitch class', 'Velocity'] },
       { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
     ] },
-    { title: 'Background', controls: [
-      { key: 'gshape',    label: 'Shape',           min: 0,    max: 6,   step: 1,    def: 0,
-        names: ['Star weave', 'Lotus', 'Lattice', 'Flower of Life', "Metatron's Cube", 'Mystic Rose', 'Torus'] },
+    { title: 'Particles', controls: [
+      { key: 'particles', label: 'Amount',          min: 0,    max: 1,   step: 0.01, def: 0.4 },
+      { key: 'pspeed',    label: 'Speed',           min: 0.2,  max: 3,   step: 0.01, def: 1 },
+      { key: 'pspread',   label: 'Spread',          min: 0,    max: 3,   step: 0.01, def: 1 },
+      { key: 'psize',     label: 'Size',            min: 0.3,  max: 3,   step: 0.01, def: 1 },
+      { key: 'plife',     label: 'Lifetime',        min: 0.3,  max: 3,   step: 0.01, def: 1 },
+      { key: 'shed',      label: 'Note shedding',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
+    ] },
+    { title: 'Geometry', controls: [
+      // New shapes go on the end: a preset stores the shape as its place in this list
+      { key: 'gshape',    label: 'Shape',           min: 0,    max: 12,  step: 1,    def: 0, choice: true,
+        names: ['Star weave', 'Lotus', 'Lattice', 'Flower of Life', "Metatron's Cube", 'Mystic Rose', 'Torus',
+          'Phyllotaxis', 'Spirograph', 'Circle of fifths', 'Platonic solids', 'Penrose tiling', 'Girih star'] },
       { key: 'gcomplex',  label: 'Complexity',      min: 1,    max: 10,  step: 1,    def: 5 },
-      { key: 'gspin',     label: 'Spin',            min: 0,    max: 3,   step: 0.01, def: 0.4 },
+      { key: 'gsize',     label: 'Size',            min: 0.3,  max: 2,   step: 0.01, def: 1 },
+      { key: 'gline',     label: 'Line weight',     min: 0.3,  max: 4,   step: 0.05, def: 1 },
+      { key: 'gspin',     label: 'Spin',            min: -3,   max: 3,   step: 0.01, def: 0.4 },
       { key: 'gopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.35 },
       { key: 'gsat',      label: 'Saturation',      min: 0,    max: 1,   step: 0.01, def: 0.8 },
-      { key: 'greveal',   label: 'Appears',         min: 0,    max: 1,   step: 1,    def: 0, names: ['Always', 'When played'] },
+    ] },
+    { title: 'Reaction', controls: [
+      { key: 'greveal',   label: 'Geometry appears', min: 0,   max: 1,   step: 1,    def: 0, names: ['Always', 'When played'] },
       { key: 'gdraw',     label: 'Draw speed',      min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 },
       { key: 'gfade',     label: 'Fade time',       min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 },
       { key: 'greact',    label: 'Play response',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
-      { key: 'weather',   label: 'Weather',         min: 0,    max: 2,   step: 1,    def: 0, names: ['Off', 'Rain', 'Snow'] },
-      { key: 'wamount',   label: 'Weather amount',  min: 0.05, max: 1,   step: 0.01, def: 0.5 },
+    ] },
+    { title: 'Weather', controls: [
+      { key: 'weather',   label: 'Kind',            min: 0,    max: 2,   step: 1,    def: 0, names: ['Off', 'Rain', 'Snow'] },
+      { key: 'wamount',   label: 'Amount',          min: 0.05, max: 1,   step: 0.01, def: 0.5, when: () => S.weather > 0 },
+      { key: 'wwind',     label: 'Wind',            min: -1,   max: 1,   step: 0.01, def: 0,   when: () => S.weather > 0 },
+      { key: 'wspeed',    label: 'Fall speed',      min: 0.3,  max: 3,   step: 0.01, def: 1,   when: () => S.weather > 0 },
     ] },
     { title: 'Image', controls: [
       { key: 'iopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.5 },
+      { key: 'iblur',     label: 'Blur',            min: 0,    max: 1,   step: 0.01, def: 0 },
+      { key: 'idim',      label: 'Dim',             min: 0,    max: 1,   step: 0.01, def: 0 },
     ] },
   ];
   const CONTROLS = GROUPS.flatMap(g => g.controls);
@@ -135,47 +164,59 @@
   const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch {} };
 
   const rows = document.getElementById('rows');
-  const inputs = {}, sections = {};
+  const inputs = {}, sections = { Presets: document.getElementById('presets') };
+  const changed = () => { save(); dropHash(); syncRows(); };
   for (const g of GROUPS) {
-    const section = document.createElement('details');
+    const section = sections[g.title] = document.createElement('details');
     section.open = true;
     section.innerHTML = `<summary>${g.title}</summary>`;
-    rows.appendChild(section);
-    sections[g.title] = section;
     for (const c of g.controls) {
       const row = document.createElement('div');
-      row.className = 'row';
-      row.innerHTML = `<label><span>${c.label}</span><output></output></label>
-        <input type="range" min="${c.min}" max="${c.max}" step="${c.step}">`;
-      const input = row.querySelector('input'), out = row.querySelector('output');
-      const show = () => out.textContent = c.names ? c.names[+input.value] : (+input.value).toFixed(c.step < 1 ? 2 : 0);
-      input.value = S[c.key]; show();
-      input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); dropHash(); syncRows(); });
-      inputs[c.key] = { input, show, row };
+      let set; // takes any number, keeps the nearest value the control allows
+      if (c.choice) {
+        row.className = 'chips';
+        row.setAttribute('role', 'radiogroup');
+        row.setAttribute('aria-label', c.label);
+        row.innerHTML = c.names.map((name, i) =>
+          `<label><input type="radio" name="${c.key}" value="${i}"><span>${name}</span></label>`).join('');
+        const radios = [...row.querySelectorAll('input')];
+        set = v => {
+          S[c.key] = Math.min(c.max, Math.max(c.min, Math.round(v) || 0));
+          radios[S[c.key]].checked = true;
+        };
+        row.addEventListener('change', e => { S[c.key] = +e.target.value; changed(); });
+      } else {
+        row.className = 'row';
+        row.innerHTML = `<label><span>${c.label}</span><output></output></label>
+          <input type="range" min="${c.min}" max="${c.max}" step="${c.step}">`;
+        const input = row.querySelector('input'), out = row.querySelector('output');
+        const show = () => out.textContent = c.names ? c.names[+input.value] : (+input.value).toFixed(c.step < 1 ? 2 : 0);
+        // the range input clamps and snaps to its step
+        set = v => { input.value = v; S[c.key] = +input.value; show(); };
+        input.addEventListener('input', () => { S[c.key] = +input.value; show(); changed(); });
+      }
+      set(S[c.key]);
+      inputs[c.key] = { set, row };
       section.appendChild(row);
     }
   }
-  // Image and Presets are short, so they share the last column
-  {
+  // Short sections share a column
+  for (const titles of [['Keyboard'], ['Particles', 'Weather'], ['Geometry'], ['Reaction', 'Image', 'Presets']]) {
     const col = document.createElement('div');
     rows.appendChild(col);
-    col.append(sections.Image, document.getElementById('presets'));
+    col.append(...titles.map(t => sections[t]));
   }
   // Some sliders only apply in one mode; show them only then
   function syncRows() { for (const c of CONTROLS) if (c.when) inputs[c.key].row.hidden = !c.when(); }
   syncRows();
   document.getElementById('reset').onclick = () => {
-    for (const c of CONTROLS) { S[c.key] = c.def; inputs[c.key].input.value = c.def; inputs[c.key].show(); }
-    save(); dropHash(); syncRows();
+    for (const c of CONTROLS) inputs[c.key].set(c.def);
+    changed();
   };
-  // Every slider gets a uniform random value from its own range
+  // Every control gets a uniform random value from its own range
   const randomize = () => {
-    for (const c of CONTROLS) {
-      const { input, show } = inputs[c.key];
-      input.value = c.min + Math.random() * (c.max - c.min); // the range input snaps to its step
-      S[c.key] = +input.value; show();
-    }
-    save(); dropHash(); syncRows();
+    for (const c of CONTROLS) inputs[c.key].set(c.min + Math.random() * (c.max - c.min));
+    changed();
   };
   document.getElementById('random').onclick = randomize;
 
@@ -184,6 +225,28 @@
   // kept in this browser only, and is not part of a preset.
   const IMG_STORE = 'rach-viz-image', IMG_MAX = 2560;
   let bgImage = null; // a canvas holding the picture, or null
+  // Blur and Dim are baked into a second copy, redone only when a slider or the picture changes.
+  // A blurred picture holds no fine detail, so the copy is small and the blur on it is cheap.
+  let bgBaked = null, bakedFor = '';
+  function shownImage() {
+    if (!S.iblur && !S.idim) return bgImage;
+    const key = S.iblur + ':' + S.idim;
+    if (key !== bakedFor) {
+      bakedFor = key;
+      const sigma = S.iblur * 0.025 * Math.max(bgImage.width, bgImage.height);
+      const k = Math.max(1, sigma / 2.5);
+      bgBaked ||= document.createElement('canvas');
+      const w = bgBaked.width = Math.ceil(bgImage.width / k), h = bgBaked.height = Math.ceil(bgImage.height / k);
+      const c = bgBaked.getContext('2d');
+      // Drawn a little oversize, so the blur has picture to pull from at the edges
+      const pad = sigma ? Math.ceil(2 * sigma / k) : 0;
+      if (fastGlow && sigma) c.filter = `blur(${sigma / k}px)`;
+      c.drawImage(bgImage, -pad, -pad, w + 2 * pad, h + 2 * pad);
+      c.filter = 'none';
+      if (S.idim) { c.fillStyle = `rgba(0, 0, 0, ${S.idim})`; c.fillRect(0, 0, w, h); }
+    }
+    return bgBaked;
+  }
   {
     const pair = document.createElement('div');
     pair.className = 'pair';
@@ -197,7 +260,7 @@
       c.width = Math.max(1, Math.round(img.naturalWidth * k));
       c.height = Math.max(1, Math.round(img.naturalHeight * k));
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      bgImage = c; removeBtn.hidden = false;
+      bgImage = c; bakedFor = ''; removeBtn.hidden = false;
       return c;
     };
     const load = (url, then) => {
@@ -231,15 +294,16 @@
   // Fills the space above the keyboard, cropped to fit
   function drawImage(keyTop) {
     if (!bgImage || S.iopacity <= 0 || keyTop < 1) return;
-    const k = Math.max(W / bgImage.width, keyTop / bgImage.height);
+    const img = shownImage();
+    const k = Math.max(W / img.width, keyTop / img.height);
     const sw = W / k, sh = keyTop / k;
     ctx.globalAlpha = S.iopacity;
-    ctx.drawImage(bgImage, (bgImage.width - sw) / 2, (bgImage.height - sh) / 2, sw, sh, 0, 0, W, keyTop);
+    ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, W, keyTop);
     ctx.globalAlpha = 1;
   }
 
   // ---------- Presets ----------
-  // A preset code is every slider as key=value, e.g. "speed=0.35&width=0.8&...".
+  // A preset code is every control as key=value, e.g. "speed=0.35&width=0.8&...".
   // The same string after a # in the URL loads it on arrival.
   const presetCode = () => CONTROLS.map(c => `${c.key}=${S[c.key]}`).join('&');
   const presetLink = () => location.href.split('#')[0] + '#' + presetCode();
@@ -250,9 +314,7 @@
     for (const c of CONTROLS) {
       const raw = params.get(c.key), v = parseFloat(raw);
       if (raw == null || !Number.isFinite(v)) continue;
-      const { input, show } = inputs[c.key];
-      input.value = v; // the range input clamps and snaps to its step
-      S[c.key] = +input.value; show(); found++;
+      inputs[c.key].set(v); found++;
     }
     if (found) { save(); syncRows(); }
     return found > 0;
@@ -339,7 +401,7 @@
   }
 
   // Particles are stamped from a sheet of pre-drawn dots: a column per hue, a row per brightness
-  const HUES = 72, TONES = 4, CELL = 16, DOT = 7;
+  const HUES = 72, TONES = 4, CELL = 32, DOT = 14;
   const sprites = document.createElement('canvas');
   {
     sprites.width = HUES * CELL; sprites.height = TONES * CELL;
@@ -358,15 +420,23 @@
   const flash = new Float32Array(128);
   const MAX_PARTICLES = 9000;
 
-  const hueOf = n => (S.hue + S.spread * (n - LOW) / (HIGH - LOW)) % 360;
-  const colorOf = (n, l = 62, a = 1) => `hsla(${hueOf(n)}, 95%, ${keyGeo[n].black ? l - 10 : l}%, ${a})`;
+  const lastVel = new Float32Array(128).fill(0.8); // how hard each key was last struck
+  // Color by: place on the keyboard, place on the circle of fifths (so octaves match and
+  // related notes sit close), or how hard the note was struck
+  const hueOf = (n, vel = lastVel[n]) => (S.hue + S.spread *
+    (S.cmode === 1 ? (n * 7 % 12) / 12 : S.cmode === 2 ? vel : (n - LOW) / (HIGH - LOW))) % 360;
+  const colorOf = (n, l = 62, a = 1, vel) => `hsla(${hueOf(n, vel)}, 95%, ${keyGeo[n].black ? l - 10 : l}%, ${a})`;
+  // Velocity sensitivity: how far a strike's force shows in its bar. 0.5 is the plain response,
+  // 0 makes every note look alike, and past 0.5 hard notes also grow wider and soft ones thinner.
+  const feel = vel => Math.max(0, Math.min(1.3, 0.7 + (vel - 0.7) * 2 * S.vsens));
+  const girth = vel => 1 + Math.max(0, S.vsens - 0.5) * 0.8 * (vel - 0.7);
 
   function noteOn(n, vel = 0.8) {
     if (n < LOW || n > HIGH) return;
     if (held.has(n)) noteOff(n);
     const bar = { note: n, vel, start: performance.now(), end: null };
     held.set(n, bar); bars.push(bar);
-    flash[n] = 1;
+    flash[n] = 1; lastVel[n] = vel;
     feed(bar);
     burst(n, vel, Math.round(amount() * 0.5 * (0.4 + vel)));
   }
@@ -379,7 +449,10 @@
   const amount = () => 12 * S.particles + 260 * S.particles ** 3;
 
   function spawn(x, y, vx, vy, life, size, hue) {
-    if (particles.length < MAX_PARTICLES) particles.push({ x, y, vx, vy, life, max: life, size, col: spriteCol(hue) });
+    if (particles.length < MAX_PARTICLES) {
+      life *= S.plife;
+      particles.push({ x, y, vx, vy, life, max: life, size: size * S.psize, col: spriteCol(hue) });
+    }
   }
 
   function burst(n, vel, count) {
@@ -500,8 +573,155 @@
   }
   const lerp = (a, b, t) => Math.round(a + (b - a) * t);
 
+  const PHI = (1 + Math.sqrt(5)) / 2;
+  const polar = (a, r = 1) => [Math.cos(a) * r, Math.sin(a) * r];
+  const chain = pts => pts.slice(1).map((p, i) => [...pts[i], ...p]); // a polyline as separate lines
+
+  // Spirograph: a pen on a small wheel rolling inside a big one. The wheel is p/q the size of
+  // the ring, which gives q lobes after p turns; pen is how far out along the spoke the pen sits.
+  const SPIRO = [[3, 1, 1], [5, 2, 1], [4, 1, 0.6], [7, 3, 1], [6, 1, 1.5], [8, 3, 0.8], [9, 4, 1], [10, 3, 1.4], [12, 5, 0.9], [15, 7, 1]];
+  function spiro(q, p, pen) {
+    const r = p / q, d = r * pen, k = 1 / (1 - r + d), w = (1 - r) / r, steps = p * 96, pts = [];
+    for (let i = 0; i <= steps; i++) {
+      const a = TAU * p * i / steps;
+      pts.push([((1 - r) * Math.cos(a) + d * Math.cos(w * a)) * k, ((1 - r) * Math.sin(a) - d * Math.sin(w * a)) * k]);
+    }
+    return chain(pts);
+  }
+
+  // Circle of fifths: the twelve notes on a ring, each a fifth from its neighbours, C at the top.
+  // Complexity adds the figures that join every k-th note: the twelve-sided ring itself, the four
+  // augmented triads, the three diminished sevenths, the two whole-tone scales, the chromatic star
+  // and the tritones. The chord being played is drawn over it by drawChord.
+  function fifths(stage) {
+    const pts = ring(12, 1, -Math.PI / 2), lines = [];
+    [1, 4, 3, 2, 5, 6].slice(0, stage + 1).forEach(k => pts.forEach((p, i) => {
+      if (k < 6 || i < 6) lines.push([...p, ...pts[(i + k) % 12]]);
+    }));
+    return { lines, circles: [[0, 0, 1], ...disc(pts, 0.035)] };
+  }
+
+  // Platonic solids: wireframes turning in space, nested one inside the next. Being solid, they
+  // are projected afresh every frame instead of being drawn once.
+  const SOLIDS = (() => {
+    const spins = v => [v, [v[1], v[2], v[0]], [v[2], v[0], v[1]]];
+    // every rotation of the coordinates with every choice of signs
+    const all = seeds => {
+      const seen = new Map();
+      for (const seed of seeds) for (const v of spins(seed)) for (let m = 0; m < 8; m++) {
+        const p = v.map((x, k) => (m >> k & 1 ? -x : x) + 0);
+        seen.set(p.map(x => Math.round(x * 1e4)).join(), p);
+      }
+      return [...seen.values()];
+    };
+    return [
+      [[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]],  // tetrahedron
+      all([[1, 1, 1]]),                                     // cube
+      all([[1, 0, 0]]),                                     // octahedron
+      all([[1, 1, 1], [0, 1 / PHI, PHI]]),                  // dodecahedron
+      all([[0, 1, PHI]]),                                   // icosahedron
+    ].map(raw => {
+      const len = Math.hypot(...raw[0]), verts = raw.map(p => p.map(x => x / len));
+      const gap = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+      let near = Infinity;
+      for (const a of verts) for (const b of verts) if (a !== b) near = Math.min(near, gap(a, b));
+      const edges = []; // the edges join each corner to its nearest neighbours
+      verts.forEach((a, i) => verts.forEach((b, j) => { if (j > i && gap(a, b) < near * 1.01) edges.push([i, j]); }));
+      return { verts, edges };
+    });
+  })();
+  // Outside to inside: one solid alone, then pairs that mirror each other, up to all five in Kepler's order
+  const NESTS = [[0], [1], [2], [3], [4], [1, 2], [3, 4], [4, 3, 1], [3, 4, 1, 2], [1, 0, 3, 4, 2]];
+  function solids(nest) {
+    const parts = nest.map(k => ({ ...SOLIDS[k], items: SOLIDS[k].edges.map(() => ({})) }));
+    return {
+      layers: nest.length, scale: 0.6, sym: 6, paths: [],
+      count: parts.reduce((n, s) => n + s.edges.length, 0),
+      layerOrbits: parts.map(s => s.items.map(it => [it])),
+      update(T) {
+        parts.forEach((sd, i) => {
+          const ay = T * 0.3 * (i % 2 ? -1 : 1) + i * 1.3, ax = 0.45 + 0.3 * Math.sin(T * 0.11 + i);
+          const cy = Math.cos(ay), sy = Math.sin(ay), cx = Math.cos(ax), sx = Math.sin(ax);
+          const pts = sd.verts.map(([x, y, z]) => {
+            const x1 = x * cy + z * sy, z1 = z * cy - x * sy, y1 = y * cx - z1 * sx, z2 = z1 * cx + y * sx;
+            const k = 3.2 / (3.2 - z2) * 0.76; // nearer corners loom larger
+            return [x1 * k, y1 * k];
+          });
+          const path = this.paths[i] = new Path2D();
+          sd.edges.forEach(([a, b], j) => {
+            const [x0, y0] = pts[a], [x1, y1] = pts[b], it = sd.items[j];
+            path.moveTo(x0, y0); path.lineTo(x1, y1);
+            it.x = x0; it.y = y0; it.dx = x1 - x0; it.dy = y1 - y0;
+          });
+        });
+      },
+    };
+  }
+
+  // Penrose tiling: thick and thin rhombs that fill the plane with fivefold symmetry and never
+  // repeat. Ten triangles around the centre are each cut into smaller ones, over and over.
+  const PENROSE = [[2, 1], [3, 1.3], [3, 1], [4, 1.4], [4, 1.15], [4, 1], [5, 1.4], [5, 1.15], [5, 1], [6, 1.3]];
+  function penrose(cuts, zoom) {
+    const mix = (P, Q) => [P[0] + (Q[0] - P[0]) / PHI, P[1] + (Q[1] - P[1]) / PHI];
+    let tris = [];
+    for (let i = 0; i < 10; i++) {
+      const B = polar((2 * i - 1) * Math.PI / 10), C = polar((2 * i + 1) * Math.PI / 10);
+      tris.push(i % 2 ? [0, [0, 0], B, C] : [0, [0, 0], C, B]);
+    }
+    for (let c = 0; c < cuts; c++) tris = tris.flatMap(([thick, A, B, C]) => {
+      if (!thick) { const P = mix(A, B); return [[0, C, P, B], [1, P, C, A]]; }
+      const Q = mix(B, A), R = mix(B, C);
+      return [[1, R, C, A], [1, Q, R, B], [0, R, Q, A]];
+    });
+    // Two triangles make a rhomb; the side they share is left out. Neighbours share the rest.
+    const edges = new Map(), id = P => Math.round(P[0] * 1e4) + ',' + Math.round(P[1] * 1e4);
+    for (const [, A, B, C] of tris) for (const P of [B, C]) {
+      // A zoomed tiling is trimmed to a disc. Both halves of a rhomb share its middle, so they stay or go together.
+      if (Math.hypot(B[0] + C[0], B[1] + C[1]) / 2 * zoom > 0.94) continue;
+      const a = id(A), b = id(P);
+      edges.set(a < b ? a + ':' + b : b + ':' + a, [A[0] * zoom, A[1] * zoom, P[0] * zoom, P[1] * zoom]);
+    }
+    return [...edges.values()];
+  }
+
+  // Girih star: an Islamic star pattern made the way Hankin described. Tile the plane with
+  // octagons and squares, then from the middle of every tile edge send two lines inward at a set
+  // angle until they meet their neighbours. The tiles are never drawn, only the stars they leave.
+  const GIRIH = [[1, 60], [1, 72], [2, 50], [2, 60], [2, 72], [3, 50], [3, 67.5], [3, 76], [4, 60], [4, 72]];
+  function girih(n, degrees) {
+    const tan = Math.tan(degrees * Math.PI / 180), lines = [], inside = (q, k) => Math.hypot(q, k) <= n + 0.5;
+    let far = 0; // the patch of tiles is scaled to fill the unit circle
+    for (let q = 0; q <= n; q++) for (let k = 0; k <= n; k++) if (inside(q, k)) far = Math.max(far, Math.hypot(q, k));
+    const g = 1 / (far + 0.54);
+    const tile = (cx, cy, sides, apothem, a0) => {
+      const h = Math.PI / sides, t = apothem / (Math.cos(h) + Math.sin(h) * tan);
+      for (let i = 0; i < sides; i++) {
+        const a = a0 + i * 2 * h;
+        const P = [cx + Math.cos(a + h) * t, cy + Math.sin(a + h) * t];
+        lines.push([cx + Math.cos(a) * apothem, cy + Math.sin(a) * apothem, ...P],
+          [cx + Math.cos(a + 2 * h) * apothem, cy + Math.sin(a + 2 * h) * apothem, ...P]);
+      }
+    };
+    for (let q = -n - 1; q <= n; q++) for (let k = -n - 1; k <= n; k++) {
+      if (inside(q, k)) tile(q * g, k * g, 8, g / 2, 0);
+      if (inside(q + 0.5, k + 0.5)) tile((q + 0.5) * g, (k + 0.5) * g, 4, g * (Math.SQRT1_2 - 0.5), Math.PI / 4);
+    }
+    return lines;
+  }
+
+  // Sunflower: seeds a golden angle apart, joined along the two families of spirals the eye picks out
+  function sunflower(t) {
+    const N = lerp(50, 420, t), [f1, f2] = N < 130 ? [8, 13] : N < 330 ? [13, 21] : [21, 34];
+    const at = i => polar(i * GOLDEN, Math.sqrt((i + 0.5) / N) * 0.97), lines = [];
+    for (let i = 0; i < N; i++) for (const f of t < 0.25 ? [] : t < 0.6 ? [f1] : [f1, f2])
+      if (i + f < N) lines.push([...at(i), ...at(i + f)]);
+    return { lines, circles: Array.from({ length: N }, (_, i) => [...at(i), 0.42 / Math.sqrt(N)]) };
+  }
+
   // Unit-radius shapes, each drawn as nested counter-rotating layers.
-  // t is the complexity slider, 0 (sparse) to 1 (dense).
+  // t is the complexity slider, 0 (sparse) to 1 (dense), and i is its step, 0 to 9.
+  // fine marks shapes built from many short pieces: those light up in rings when played, and
+  // count says how many strokes' worth of ink they hold.
   const SHAPES = [
     t => ({ layers: lerp(2, 6, t), scale: 0.72, ...weave(6, t < 0.15 ? 0 : t > 0.85 ? 2 : 1, 0.6, 1, lerp(5, 23, t)) }),
     t => ({ layers: lerp(2, 5, t), scale: 0.7,  ...weave(lerp(5, 12, t), 1, 0.78, 1, lerp(5, 20, t)) }),
@@ -514,6 +734,12 @@
     },
     t => ({ layers: lerp(1, 5, t), scale: 0.62, lines: allPairs(ring(lerp(6, 22, t), 1)), circles: [[0, 0, 1]] }),
     t => ({ layers: lerp(1, 5, t), scale: 0.62, circles: disc(ring(lerp(8, 48, t), 0.5), 0.5) }),
+    t => ({ layers: 1, scale: 1, sym: 5, fine: true, ...sunflower(t) }),
+    (t, i) => ({ layers: lerp(2, 4, t), scale: 0.66, sym: SPIRO[i][0], fine: true, count: SPIRO[i][0] * SPIRO[i][1] * 6, lines: spiro(...SPIRO[i]) }),
+    (t, i) => ({ layers: Math.max(1, i - 4), scale: 0.62, sym: 6, fifths: true, ...fifths(i) }),
+    (t, i) => solids(NESTS[i]),
+    (t, i) => ({ layers: 1, scale: 1, sym: 5, lines: penrose(...PENROSE[i]) }),
+    (t, i) => ({ layers: 1, scale: 1, sym: 8, lines: girih(...GIRIH[i]) }),
   ];
   // Strokes that are copies of each other under the figure's symmetry sit at the same distance
   // from the centre and have the same size. Each such set is an orbit: one ring of matching strokes.
@@ -521,7 +747,7 @@
   function orbitsOf(shape) {
     const map = new Map();
     const add = (r, size, item) => {
-      const key = Math.round(r * 500) + ':' + Math.round(size * 500);
+      const key = shape.fine ? Math.round(r * 14) : Math.round(r * 500) + ':' + Math.round(size * 500);
       if (!map.has(key)) map.set(key, { r, items: [] });
       map.get(key).items.push(item);
     };
@@ -548,14 +774,16 @@
   function currentShape() {
     const key = S.gshape + ':' + S.gcomplex;
     if (!shapeCache.has(key)) {
-      const shape = (SHAPES[S.gshape] || SHAPES[0])((S.gcomplex - 1) / 9);
+      const shape = (SHAPES[S.gshape] || SHAPES[0])((S.gcomplex - 1) / 9, S.gcomplex - 1);
       // Dim dense shapes so their centres don't burn out to white
-      const strokes = ((shape.lines || []).length + (shape.circles || []).length) * shape.layers;
+      const strokes = shape.count ?? ((shape.lines || []).length + (shape.circles || []).length) * shape.layers;
       shape.dim = Math.min(1, Math.sqrt(900 / strokes));
-      shape.orbits = orbitsOf(shape);
-      const path = shape.path = new Path2D();
-      for (const l of shape.lines || []) { path.moveTo(l[0], l[1]); path.lineTo(l[2], l[3]); }
-      for (const c of shape.circles || []) { path.moveTo(c[0] + c[2], c[1]); path.arc(c[0], c[1], c[2], 0, TAU); }
+      if (!shape.update) { // shapes that move build their own paths and orbits every frame
+        shape.orbits = orbitsOf(shape);
+        const path = shape.path = new Path2D();
+        for (const l of shape.lines || []) { path.moveTo(l[0], l[1]); path.lineTo(l[2], l[3]); }
+        for (const c of shape.circles || []) { path.moveTo(c[0] + c[2], c[1]); path.arc(c[0], c[1], c[2], 0, TAU); }
+      }
       shapeCache.set(key, shape);
     }
     return shapeCache.get(key);
@@ -634,7 +862,7 @@
   // the figure, flash on the attack, shimmer while the key is down, then unravel and fade.
   const lights = [], MAX_LIGHTS = 80; // bars still lighting the figure
   function drawLit(now, shape, cx, cy, tf) {
-    const orbits = shape.orbits, per = Math.min(12, orbits.length), L = shape.layers;
+    const L = shape.layers, lw = S.gline;
     const strength = Math.min(1, S.gopacity * 2.5), sat = S.gsat * 100;
     ctx.lineCap = 'round';
     for (let i = lights.length - 1; i >= 0; i--) {
@@ -646,6 +874,7 @@
       const f = pitchPos(b.note) * (L - 1), i0 = Math.floor(f);
       for (const [li, wgt] of [[i0, 1 - (f - i0)], [i0 + 1, f - i0]]) {
         if (li >= L || wgt < 0.15) continue;
+        const orbits = shape.layerOrbits ? shape.layerOrbits[li] : shape.orbits, per = Math.min(12, orbits.length);
         ctx.save();
         ctx.translate(cx, cy); ctx.rotate(tf[li][0]); ctx.scale(tf[li][1], tf[li][1]);
         ctx.beginPath();
@@ -671,13 +900,13 @@
           }
         }
         ctx.restore(); // the path keeps its transform; stroke width stays in screen pixels
-        const hue = hueOf(b.note) + S.greact * live.hue;
+        const hue = hueOf(b.note, b.vel) + S.greact * live.hue;
         const shimmer = b.end == null ? 0.85 + 0.15 * Math.sin(now * 0.006 + b.note * 2.1) : 1;
         const alpha = strength * fade * (0.45 + 0.55 * b.vel) * Math.sqrt(wgt) * shimmer;
         ctx.strokeStyle = `hsla(${hue}, ${sat}%, 60%, ${alpha * 0.16})`;
-        ctx.lineWidth = 5 + 4 * b.vel + 6 * hit; ctx.stroke();
+        ctx.lineWidth = (5 + 4 * b.vel + 6 * hit) * lw; ctx.stroke();
         ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${68 + 24 * hit}%, ${alpha})`;
-        ctx.lineWidth = (0.8 + b.vel) * (1 + 0.8 * hit); ctx.stroke();
+        ctx.lineWidth = (0.8 + b.vel) * (1 + 0.8 * hit) * lw; ctx.stroke();
       }
     }
   }
@@ -706,9 +935,35 @@
       const hue = (hueOf(t.a) + hueOf(t.b)) / 2 + react * live.hue;
       const alpha = S.gopacity * (0.25 + 0.75 * react) * a * Math.min(1, (now - t.born) / 150);
       ctx.strokeStyle = `hsla(${hue}, ${S.gsat * 100}%, 62%, ${alpha * 0.15})`;
-      ctx.lineWidth = 4 + 3 * t.vel; ctx.stroke();
+      ctx.lineWidth = (4 + 3 * t.vel) * S.gline; ctx.stroke();
       ctx.strokeStyle = `hsla(${hue}, ${S.gsat * 100}%, 72%, ${alpha})`;
-      ctx.lineWidth = 0.8 + t.vel; ctx.stroke();
+      ctx.lineWidth = (0.8 + t.vel) * S.gline; ctx.stroke();
+    }
+  }
+
+  // Circle of fifths only: the notes sounding light their places on the ring, and lines join
+  // them into the shape of the chord. A fifth is a short side, a tritone a diameter.
+  function drawChord(now, cx, cy, rot, s) {
+    const on = []; // per place on the ring: the strongest note sounding there
+    for (const b of lights) {
+      const a = linger(b, now) * (0.4 + 0.6 * b.vel), j = b.note * 7 % 12;
+      if (a > 0 && !(on[j]?.a >= a)) on[j] = { a, hue: hueOf(b.note, b.vel), x: cx + Math.cos(rot + (j - 3) * TAU / 12) * s, y: cy + Math.sin(rot + (j - 3) * TAU / 12) * s };
+    }
+    const pts = on.filter(Boolean), strength = Math.min(1, S.gopacity * 2.5), sat = S.gsat * 100;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length];
+      ctx.fillStyle = `hsla(${p.hue}, ${sat}%, 72%, ${strength * p.a})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, (3 + 5 * p.a) * Math.sqrt(S.gline), 0, TAU); ctx.fill();
+      if (pts.length < 2 || (pts.length === 2 && i)) continue; // two notes share one line
+      const alpha = strength * Math.min(p.a, q.a);
+      // Hues are averaged the short way round the wheel
+      const hue = p.hue + (((q.hue - p.hue) % 360 + 540) % 360 - 180) / 2;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y);
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 62%, ${alpha * 0.2})`;
+      ctx.lineWidth = 9 * S.gline; ctx.stroke();
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 78%, ${alpha})`;
+      ctx.lineWidth = 2 * S.gline; ctx.stroke();
     }
   }
 
@@ -719,8 +974,9 @@
     geoT += dt * S.gspin * (1 + react * live.energy);
     if (S.gopacity <= 0 || keyTop < 40) return;
     const shape = currentShape();
-    const R = Math.min(W * 0.48, keyTop * 0.54), cx = W / 2, cy = keyTop / 2;
-    const sym = shape.sym || 6, reveal = S.greveal === 1;
+    const R = Math.min(W * 0.48, keyTop * 0.54) * S.gsize, cx = W / 2, cy = keyTop / 2;
+    const sym = shape.sym || 6, reveal = S.greveal === 1, lw = S.gline;
+    shape.update?.(geoT);
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
     ctx.globalCompositeOperation = 'lighter';
@@ -741,12 +997,14 @@
       ctx.save();
       ctx.translate(cx, cy); ctx.rotate(rot); ctx.scale(s, s);
       ctx.strokeStyle = `hsla(${hue}, ${sat}%, 60%, ${alpha * 0.12})`;
-      ctx.lineWidth = (4 + 3 * lv) / s; ctx.stroke(shape.path);
+      const path = shape.paths ? shape.paths[i] : shape.path;
+      ctx.lineWidth = (4 + 3 * lv) * lw / s; ctx.stroke(path);
       ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${66 + 12 * lv}%, ${Math.min(1, alpha * 0.8)})`;
-      ctx.lineWidth = 1 / s; ctx.stroke(shape.path);
+      ctx.lineWidth = lw / s; ctx.stroke(path);
       ctx.restore();
     }
     if (reveal) drawLit(now, shape, cx, cy, tf);
+    if (shape.fifths) drawChord(now, cx, cy, tf[0][0], tf[0][1]);
     if (react > 0) drawThreads(now, cx, cy, R, sym);
     ctx.restore();
   }
@@ -819,10 +1077,15 @@
   function drawWeather(dt, now, keyTop) {
     // Spawn. Switching modes lets what is already in the air finish falling.
     const rate = S.weather === RAIN ? 520 : S.weather === SNOW ? 130 : 0;
-    for (let k = Math.floor(rate * S.wamount * dt * W / 1280 + Math.random()); k > 0 && falling.length < MAX_WEATHER; k--) {
-      const z = rnd(0.35, 1);
-      if (S.weather === RAIN) falling.push({ type: RAIN, x: rnd(-0.05, 1.1) * W, y: -30, vx: -70 * z, vy: rnd(1.3, 1.7) * H * z, z });
-      else falling.push({ type: SNOW, x: rnd(-0.05, 1.05) * W, y: -6, vx: rnd(-12, 12), vy: rnd(0.09, 0.15) * H * z, z, phase: rnd(0, TAU) });
+    const fast = S.wspeed, wind = S.wwind;
+    // Wind leans the fall, so things enter from further upwind and the far side stays covered.
+    // Faster weather is spawned faster too: Amount sets how much is in the air, not how much arrives.
+    const lean = (S.weather === RAIN ? 0.53 : 1.25) * wind * keyTop; // sideways travel on the way down
+    const span = 1.15 * W + Math.abs(lean), left = -0.05 * W - Math.max(lean, 0);
+    for (let k = Math.floor(rate * S.wamount * fast * dt * span / 1472 + Math.random()); k > 0 && falling.length < MAX_WEATHER; k--) {
+      const z = rnd(0.35, 1), x = left + Math.random() * span;
+      if (S.weather === RAIN) falling.push({ type: RAIN, x, y: -30, vx: (0.8 * wind * H - 70) * z * fast, vy: rnd(1.3, 1.7) * H * z * fast, z });
+      else falling.push({ type: SNOW, x, y: -6, vx: rnd(-12, 12) + 0.15 * wind * H * z * fast, vy: rnd(0.09, 0.15) * H * z * fast, z, phase: rnd(0, TAU) });
     }
     if (!falling.length && !splash.length) return;
 
@@ -938,11 +1201,11 @@
       const yTop = keyTop - (now - b.start) / 1000 * pps;
       const yBot = b.end == null ? keyTop : keyTop - (now - b.end) / 1000 * pps;
       if (yBot < -40) { if (b.smear) b.smear.end ??= now; bars.splice(i, 1); continue; }
-      const kw = g.w * ww, w = Math.max(2, kw * S.width);
+      const kw = g.w * ww, w = Math.max(2, kw * S.width * girth(b.vel));
       const x = g.x * ww + (kw - w) / 2;
       const h = Math.max(yBot - yTop, 3);
       const r = Math.min(w / 2, h / 2) * S.round;
-      const light = 48 + b.vel * 22;
+      const ve = feel(b.vel), light = 48 + ve * 22;
 
       // Wiggle: a wave runs along the bar so every part of it sways side to side as it climbs.
       // It eases in from zero at the key, so the bar still leaves from the key it belongs to.
@@ -969,7 +1232,7 @@
               (Math.random() * 70 - 15) * S.pspeed,
               0.5 + Math.random() * 1.2,
               0.6 + Math.random() * 1.5,
-              hueOf(b.note) + (Math.random() - 0.5) * 24,
+              hueOf(b.note, b.vel) + (Math.random() - 0.5) * 24,
             );
           }
         }
@@ -977,18 +1240,18 @@
 
       // Reaching the top of the screen: spread a little left and right, then fade once the tail is through
       if (yTop <= 0) {
-        if (!b.smear) smears.push(b.smear = { w, hue: hueOf(b.note) | 0, start: now, end: null });
+        if (!b.smear) smears.push(b.smear = { w, hue: hueOf(b.note, b.vel) | 0, start: now, end: null });
         if (yBot > 0) b.smear.x = x + w / 2 + (off ? off(0) : 0);
         else b.smear.end ??= now;
       }
 
-      if (!fastGlow) bctx.shadowColor = colorOf(b.note, 60, 1);
-      bctx.fillStyle = colorOf(b.note, light, 0.92);
+      if (!fastGlow) bctx.shadowColor = colorOf(b.note, 60, 1, b.vel);
+      bctx.fillStyle = colorOf(b.note, light, 0.92, b.vel);
       bctx.beginPath(); barPath(off, x, yTop, w, h, r); bctx.fill();
 
       // The bright core goes on after the glow, so the glow keeps the bar's colour
       const cw = w * 0.42;
-      cores.push(off, x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round, 0.16 + b.vel * 0.2);
+      cores.push(off, x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round, 0.16 + ve * 0.2);
     }
     bctx.shadowBlur = 0;
     if (fastGlow && S.glow > 0 && cores.length) glowBars();
@@ -1010,7 +1273,7 @@
       const power = (on ? 0.55 : 0) + flash[n] * 0.6;
       const rad = ww * (2.2 + flash[n] * 2.5) * (0.4 + S.glow);
       // One gradient per hue, one unit across; the transform places and sizes it
-      const hue = hueOf(n);
+      const hue = Math.round(hueOf(n));
       ctx.fillStyle = gradient('note:' + hue, () => {
         const rg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
         rg.addColorStop(0, `hsla(${hue}, 100%, 78%, 1)`);
