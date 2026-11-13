@@ -51,6 +51,13 @@
   .row label { display: flex; justify-content: space-between; margin-bottom: 3px; color: #aab1c5; }
   .row output { color: #6f778d; font-variant-numeric: tabular-nums; }
   input[type=range] { width: 100%; margin: 0; accent-color: #8ea2ff; }
+  input[type=color] {
+    display: block; width: 100%; height: 22px; padding: 0; cursor: pointer; background: none;
+    border: 1px solid rgba(255, 255, 255, .15); border-radius: 999px; overflow: hidden;
+  }
+  input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+  input[type=color]::-webkit-color-swatch { border: 0; }
+  input[type=color]::-moz-color-swatch { border: 0; }
   /* A choice with many named options: every option is a chip, so all of them can be read at once */
   .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
   .chips label { position: relative; cursor: pointer; }
@@ -113,7 +120,7 @@
       { key: 'wiggle',    label: 'Wiggle',          min: 0,    max: 1,   step: 0.01, def: 0 },
       { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
       { key: 'vsens',     label: 'Velocity sensitivity', min: 0, max: 1, step: 0.01, def: 0.5 },
-      { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
+      { key: 'hue',       label: 'Color',           min: 0,    max: 360, step: 1,    def: 215, color: true },
       { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
       { key: 'cmode',     label: 'Color by',        min: 0,    max: 2,   step: 1,    def: 0, names: ['Pitch', 'Pitch class', 'Velocity'] },
       { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
@@ -185,6 +192,30 @@
           radios[S[c.key]].checked = true;
         };
         row.addEventListener('change', e => { S[c.key] = +e.target.value; changed(); });
+      } else if (c.color) {
+        // A colour picker that stands for a hue. Only the hue of the picked colour is used,
+        // so once the picker closes the swatch settles on the colour the notes really get.
+        row.className = 'row';
+        row.innerHTML = `<label><span>${c.label}</span><output></output></label><input type="color">`;
+        const input = row.querySelector('input'), out = row.querySelector('output');
+        const hex = h => '#' + [0, 8, 4].map(n => {
+          const k = (n + h / 30) % 12, v = 0.62 - 0.361 * Math.max(-1, Math.min(k - 3, 9 - k, 1)); // hsl(h, 95%, 62%)
+          return Math.round(v * 255).toString(16).padStart(2, '0');
+        }).join('');
+        const hueIn = text => {
+          const [r, g, b] = [1, 3, 5].map(i => parseInt(text.slice(i, i + 2), 16)), hi = Math.max(r, g, b), d = hi - Math.min(r, g, b);
+          if (d < 8) return null; // a grey has no hue
+          return Math.round(60 * (hi === r ? ((g - b) / d + 6) % 6 : hi === g ? (b - r) / d + 2 : (r - g) / d + 4)) % 360;
+        };
+        set = v => {
+          S[c.key] = Math.min(c.max, Math.max(c.min, Math.round(v) || 0));
+          input.value = hex(S[c.key]); out.textContent = S[c.key];
+        };
+        input.addEventListener('input', () => {
+          const h = hueIn(input.value);
+          if (h != null) { S[c.key] = h; out.textContent = h; changed(); }
+        });
+        input.addEventListener('change', () => { set(S[c.key]); input.blur(); });
       } else {
         row.className = 'row';
         row.innerHTML = `<label><span>${c.label}</span><output></output></label>
@@ -1384,7 +1415,7 @@
     document.body.classList.remove('idle');
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      if (!document.querySelector('.ui:hover, #code:focus')) document.body.classList.add('idle');
+      if (!document.querySelector('.ui:hover, #code:focus, input[type=color]:focus')) document.body.classList.add('idle');
     }, 3000);
   };
   addEventListener('pointermove', wake);
