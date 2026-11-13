@@ -49,6 +49,14 @@
   .row output { color: #6f778d; font-variant-numeric: tabular-nums; }
   input[type=range] { width: 100%; margin: 0; accent-color: #8ea2ff; }
   #reset { width: 100%; margin-top: 4px; }
+  .pair { display: flex; gap: 6px; margin-bottom: 6px; }
+  .pair > * { flex: 1; min-width: 0; }
+  .pair > #load { flex: none; }
+  input[type=text] {
+    font: inherit; color: inherit; padding: 7px 12px; border-radius: 999px;
+    background: rgba(0, 0, 0, .3); border: 1px solid rgba(255, 255, 255, .08); outline: none;
+  }
+  input[type=text]:focus { border-color: #8ea2ff; }
 </style>
 </head>
 <body>
@@ -62,6 +70,17 @@
 
 <div id="panel" class="ui">
   <div id="rows"></div>
+  <details open>
+    <summary>Preset</summary>
+    <div class="pair">
+      <button id="copyLink">Copy link</button>
+      <button id="copyCode">Copy code</button>
+    </div>
+    <div class="pair">
+      <input id="code" type="text" placeholder="Paste code or link" spellcheck="false" autocomplete="off">
+      <button id="load">Load</button>
+    </div>
+  </details>
   <button id="reset">Reset</button>
 </div>
 
@@ -118,15 +137,60 @@
       const input = row.querySelector('input'), out = row.querySelector('output');
       const show = () => out.textContent = c.names ? c.names[+input.value] : (+input.value).toFixed(c.step < 1 ? 2 : 0);
       input.value = S[c.key]; show();
-      input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); });
+      input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); dropHash(); });
       inputs[c.key] = { input, show };
       section.appendChild(row);
     }
   }
   document.getElementById('reset').onclick = () => {
     for (const c of CONTROLS) { S[c.key] = c.def; inputs[c.key].input.value = c.def; inputs[c.key].show(); }
-    save();
+    save(); dropHash();
   };
+
+  // ---------- Presets ----------
+  // A preset code is every slider as key=value, e.g. "speed=0.35&width=0.8&...".
+  // The same string after a # in the URL loads it on arrival.
+  const presetCode = () => CONTROLS.map(c => `${c.key}=${S[c.key]}`).join('&');
+  const presetLink = () => location.href.split('#')[0] + '#' + presetCode();
+  // Accepts a code or a whole link. Sliders the code doesn't mention keep their value.
+  function loadPreset(text) {
+    const params = new URLSearchParams(text.trim().split('#').pop());
+    let found = 0;
+    for (const c of CONTROLS) {
+      const raw = params.get(c.key), v = parseFloat(raw);
+      if (raw == null || !Number.isFinite(v)) continue;
+      const { input, show } = inputs[c.key];
+      input.value = v; // the range input clamps and snaps to its step
+      S[c.key] = +input.value; show(); found++;
+    }
+    if (found) save();
+    return found > 0;
+  }
+  // Once the sliders move, the preset in the address bar no longer describes them
+  function dropHash() { if (location.hash) history.replaceState(null, '', location.pathname + location.search); }
+
+  const flashLabel = (btn, text) => {
+    const was = btn.dataset.label ??= btn.textContent;
+    btn.textContent = text;
+    clearTimeout(btn.timer);
+    btn.timer = setTimeout(() => btn.textContent = was, 1200);
+  };
+  const codeBox = document.getElementById('code'), loadBtn = document.getElementById('load');
+  const copy = (btn, text) => {
+    const shown = () => { codeBox.value = text; codeBox.select(); flashLabel(btn, 'Copy from box'); };
+    if (!navigator.clipboard) return shown();
+    navigator.clipboard.writeText(text).then(() => flashLabel(btn, 'Copied'), shown);
+  };
+  document.getElementById('copyLink').onclick = e => copy(e.currentTarget, presetLink());
+  document.getElementById('copyCode').onclick = e => copy(e.currentTarget, presetCode());
+  loadBtn.onclick = () => {
+    if (!codeBox.value.trim()) return;
+    if (loadPreset(codeBox.value)) { codeBox.value = ''; dropHash(); flashLabel(loadBtn, 'Loaded'); }
+    else flashLabel(loadBtn, 'Invalid');
+  };
+  codeBox.addEventListener('keydown', e => { if (e.key === 'Enter') loadBtn.click(); });
+  if (location.hash.length > 1) loadPreset(location.hash);
+  addEventListener('hashchange', () => { if (location.hash.length > 1) loadPreset(location.hash); });
 
   // ---------- Keyboard geometry ----------
   const LOW = 21, HIGH = 108, WHITES = 52;
@@ -667,7 +731,7 @@
     document.body.classList.remove('idle');
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      if (!document.querySelector('.ui:hover')) document.body.classList.add('idle');
+      if (!document.querySelector('.ui:hover, #code:focus')) document.body.classList.add('idle');
     }, 3000);
   };
   addEventListener('pointermove', wake);
