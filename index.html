@@ -48,7 +48,6 @@
   .row label { display: flex; justify-content: space-between; margin-bottom: 3px; color: #aab1c5; }
   .row output { color: #6f778d; font-variant-numeric: tabular-nums; }
   input[type=range] { width: 100%; margin: 0; accent-color: #8ea2ff; }
-  #reset { width: 100%; margin-top: 4px; }
   .pair { display: flex; gap: 6px; margin-bottom: 6px; }
   .pair > * { flex: 1; min-width: 0; }
   .pair > #load { flex: none; }
@@ -81,7 +80,10 @@
       <button id="load">Load</button>
     </div>
   </details>
-  <button id="reset">Reset</button>
+  <div class="pair">
+    <button id="random" title="Randomize (R)">Randomize</button>
+    <button id="reset">Reset</button>
+  </div>
 </div>
 
 <script>
@@ -146,6 +148,16 @@
     for (const c of CONTROLS) { S[c.key] = c.def; inputs[c.key].input.value = c.def; inputs[c.key].show(); }
     save(); dropHash();
   };
+  // Every slider gets a uniform random value from its own range
+  const randomize = () => {
+    for (const c of CONTROLS) {
+      const { input, show } = inputs[c.key];
+      input.value = c.min + Math.random() * (c.max - c.min); // the range input snaps to its step
+      S[c.key] = +input.value; show();
+    }
+    save(); dropHash();
+  };
+  document.getElementById('random').onclick = randomize;
 
   // ---------- Presets ----------
   // A preset code is every slider as key=value, e.g. "speed=0.35&width=0.8&...".
@@ -722,6 +734,7 @@
     if (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'f' || e.key === 'F') toggleFs();
     if (e.key === 'h' || e.key === 'H') togglePanel();
+    if (e.key === 'r' || e.key === 'R') randomize();
   });
   canvas.addEventListener('dblclick', e => { if (noteAt(e.clientX, e.clientY) == null) toggleFs(); });
 
