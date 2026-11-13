@@ -34,12 +34,15 @@
   button:hover { background: rgba(40, 44, 62, .92); }
 
   #panel {
-    position: fixed; top: 60px; right: 14px; width: 250px; padding: 14px 16px 12px;
+    position: fixed; top: 60px; right: 14px; width: min(700px, calc(100vw - 28px)); padding: 14px 16px 12px;
     border-radius: 16px; background: rgba(18, 20, 30, .85); border: 1px solid rgba(255, 255, 255, .08);
     max-height: calc(100vh - 74px); overflow-y: auto;
+    /* One column per section; they wrap onto fewer columns when the window is narrow */
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0 22px; align-items: start;
   }
   #panel[hidden] { display: none; }
-  details { margin-bottom: 10px; }
+  #rows { display: contents; }
+  details { margin-bottom: 10px; min-width: 0; }
   summary {
     cursor: pointer; margin-bottom: 10px; color: #dfe3ee; font-weight: 600;
     letter-spacing: .08em; text-transform: uppercase; font-size: 11px;
@@ -69,8 +72,8 @@
 
 <div id="panel" class="ui">
   <div id="rows"></div>
-  <details open>
-    <summary>Preset</summary>
+  <details id="presets" open>
+    <summary>Presets</summary>
     <div class="pair">
       <button id="copyLink">Copy link</button>
       <button id="copyCode">Copy code</button>
@@ -79,11 +82,11 @@
       <input id="code" type="text" placeholder="Paste code or link" spellcheck="false" autocomplete="off">
       <button id="load">Load</button>
     </div>
+    <div class="pair">
+      <button id="random" title="Randomize (R)">Randomize</button>
+      <button id="reset">Reset</button>
+    </div>
   </details>
-  <div class="pair">
-    <button id="random" title="Randomize (R)">Randomize</button>
-    <button id="reset">Reset</button>
-  </div>
 </div>
 
 <script>
@@ -151,6 +154,12 @@
       inputs[c.key] = { input, show, row };
       section.appendChild(row);
     }
+  }
+  // Image and Presets are short, so they share the last column
+  {
+    const col = document.createElement('div');
+    rows.appendChild(col);
+    col.append(sections.Image, document.getElementById('presets'));
   }
   // Some sliders only apply in one mode; show them only then
   function syncRows() { for (const c of CONTROLS) if (c.when) inputs[c.key].row.hidden = !c.when(); }
