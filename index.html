@@ -34,7 +34,7 @@
   button:hover { background: rgba(40, 44, 62, .92); }
 
   #panel {
-    position: fixed; top: 60px; right: 14px; width: min(920px, calc(100vw - 28px)); padding: 14px 16px 12px;
+    position: fixed; top: 60px; right: 14px; width: min(700px, calc(100vw - 28px)); padding: 14px 16px 12px;
     border-radius: 16px; background: rgba(18, 20, 30, .85); border: 1px solid rgba(255, 255, 255, .08);
     max-height: calc(100vh - 74px); overflow-y: auto;
     /* One column per section; they wrap onto fewer columns when the window is narrow */
@@ -72,7 +72,7 @@
 
 <div id="panel" class="ui">
   <div id="rows"></div>
-  <details open>
+  <details id="presets" open>
     <summary>Presets</summary>
     <div class="pair">
       <button id="copyLink">Copy link</button>
@@ -154,6 +154,12 @@
       inputs[c.key] = { input, show, row };
       section.appendChild(row);
     }
+  }
+  // Image and Presets are short, so they share the last column
+  {
+    const col = document.createElement('div');
+    rows.appendChild(col);
+    col.append(sections.Image, document.getElementById('presets'));
   }
   // Some sliders only apply in one mode; show them only then
   function syncRows() { for (const c of CONTROLS) if (c.when) inputs[c.key].row.hidden = !c.when(); }
