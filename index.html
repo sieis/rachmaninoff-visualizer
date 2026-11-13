@@ -113,6 +113,7 @@
       { key: 'gspin',     label: 'Spin',            min: 0,    max: 3,   step: 0.01, def: 0.4 },
       { key: 'gopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.35 },
       { key: 'gsat',      label: 'Saturation',      min: 0,    max: 1,   step: 0.01, def: 0.8 },
+      { key: 'greact',    label: 'Play response',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
       { key: 'weather',   label: 'Weather',         min: 0,    max: 2,   step: 1,    def: 0, names: ['Off', 'Rain', 'Snow'] },
       { key: 'wamount',   label: 'Weather amount',  min: 0.05, max: 1,   step: 0.01, def: 0.5 },
     ] },
@@ -248,6 +249,7 @@
     const bar = { note: n, vel, start: performance.now(), end: null };
     held.set(n, bar); bars.push(bar);
     flash[n] = 1;
+    feed(bar);
     burst(n, vel, Math.round(amount() * 0.5 * (0.4 + vel)));
   }
   function noteOff(n) {
@@ -366,7 +368,7 @@
         lines.push([A[0] * fa, A[1] * fa, B[0] * fb, B[1] * fb]);
       }
     });
-    return { lines };
+    return { lines, sym: axes };
   }
   const disc = (pts, r) => pts.map(p => [...p, r]);
   // Hex lattice points within n steps of the centre, n steps spanning radius 1 - 1/(n+1)
@@ -408,9 +410,101 @@
     return shapeCache.get(key);
   }
 
+  // ---------- Playing shapes the backdrop ----------
+  // Each note is read as a 2D line: where it sits on the keyboard and how long it is held.
+  // Those feed four things, all scaled by the Play response slider:
+  //   bands    loudness per register; each backdrop layer swells and brightens with its register
+  //   energy   overall loudness; the whole figure breathes and turns a little faster
+  //   tonal    running sum of the notes on the circle of fifths; drifts the hue with the key
+  //   threads  lines stitched between notes, mirrored into a kaleidoscope over the backdrop
+  const BANDS = 8, MAX_THREADS = 90;
+  const live = {
+    raw: 0, energy: 0, hue: 0, tx: 0, ty: 0,
+    band: new Float32Array(BANDS), hold: new Float32Array(BANDS), lv: new Float32Array(BANDS),
+  };
+  const threads = []; // { a, b, vel, born, bar }  a line from note a to note b; it outlives bar by a fade
+  let lastNote = null, lastAt = 0;
+  const pitchPos = n => (n - LOW) / (HIGH - LOW);
+  function addBand(arr, n, v) {
+    const f = pitchPos(n) * (BANDS - 1), i = Math.min(BANDS - 2, Math.floor(f));
+    arr[i] += v * (1 - (f - i)); arr[i + 1] += v * (f - i);
+  }
+  const bandAt = f => {
+    const i = Math.min(BANDS - 2, Math.floor(f));
+    return live.lv[i] + (live.lv[i + 1] - live.lv[i]) * (f - i);
+  };
+
+  function feed(bar) {
+    const n = bar.note, vel = bar.vel;
+    live.raw = Math.min(1.2, live.raw + vel * 0.3);
+    addBand(live.band, n, vel);
+    const a = (n * 7 % 12) * TAU / 12;
+    live.tx += vel * Math.cos(a); live.ty += vel * Math.sin(a);
+    // A chord stitches the new note to the notes under it; a melody stitches it to the note before.
+    // A note with nothing to join leaves a ring.
+    const others = [...held.keys()].filter(m => m !== n).slice(-4);
+    if (!others.length) others.push(lastNote != null && bar.start - lastAt < 4000 ? lastNote : n);
+    for (const m of others) threads.push({ a: m, b: n, vel, born: bar.start, bar });
+    if (threads.length > MAX_THREADS) threads.splice(0, threads.length - MAX_THREADS);
+    lastNote = n; lastAt = bar.start;
+  }
+
+  function updateLive(dt) {
+    const k = 1 - Math.exp(-dt * 9), decay = Math.exp(-dt * 1.6);
+    let sum = 0;
+    live.hold.fill(0);
+    for (const b of held.values()) { sum += b.vel; addBand(live.hold, b.note, b.vel * 0.6); }
+    live.raw = Math.max(live.raw * decay, Math.min(1, sum / 3));
+    live.energy += (live.raw - live.energy) * k;
+    for (let i = 0; i < BANDS; i++) {
+      live.band[i] = Math.min(1.5, Math.max(live.band[i] * decay, live.hold[i]));
+      live.lv[i] += (Math.min(1, live.band[i]) - live.lv[i]) * k;
+    }
+    const fade = Math.exp(-dt / 5);
+    live.tx *= fade; live.ty *= fade;
+    // Sharp keys pull the hue one way, flat keys the other, up to 50 degrees
+    const want = 50 * live.ty / (1.5 + Math.hypot(live.tx, live.ty));
+    live.hue += (want - live.hue) * (1 - Math.exp(-dt * 1.5));
+  }
+
+  // A note's place in the figure: pitch class sets the angle inside a mirrored wedge,
+  // height on the keyboard sets the radius, bass outside to treble inside.
+  function drawThreads(now, cx, cy, R, sym) {
+    const react = S.greact, wedge = Math.PI / sym, base = -Math.PI / 2 + geoT * 0.12;
+    const Rf = R * (1 + 0.06 * react * live.energy);
+    const polar = n => [((n * 7 % 12) + 0.5) / 12 * wedge, Rf * (1 - 0.88 * pitchPos(n))];
+    ctx.lineCap = 'round';
+    for (let i = threads.length - 1; i >= 0; i--) {
+      const t = threads[i], end = t.bar.end;
+      // The longer the note was held, the longer its thread lingers
+      const a = end == null ? 1 : 1 - (now - end) / (1500 + Math.min(4500, (end - t.bar.start) * 2));
+      if (a <= 0) { threads.splice(i, 1); continue; }
+      const [pa, ra] = polar(t.a), [pb, rb] = polar(t.b);
+      ctx.beginPath();
+      for (let k = 0; k < sym; k++) for (const m of [1, -1]) {
+        const o = base + k * TAU / sym;
+        if (t.a === t.b) {
+          const x = cx + Math.cos(o + m * pa) * ra, y = cy + Math.sin(o + m * pa) * ra, r = 2 + 4 * t.vel;
+          ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, TAU);
+        } else {
+          ctx.moveTo(cx + Math.cos(o + m * pa) * ra, cy + Math.sin(o + m * pa) * ra);
+          ctx.lineTo(cx + Math.cos(o + m * pb) * rb, cy + Math.sin(o + m * pb) * rb);
+        }
+      }
+      const hue = (hueOf(t.a) + hueOf(t.b)) / 2 + react * live.hue;
+      const alpha = S.gopacity * (0.25 + 0.75 * react) * a * Math.min(1, (now - t.born) / 150);
+      ctx.strokeStyle = `hsla(${hue}, ${S.gsat * 100}%, 62%, ${alpha * 0.15})`;
+      ctx.lineWidth = 4 + 3 * t.vel; ctx.stroke();
+      ctx.strokeStyle = `hsla(${hue}, ${S.gsat * 100}%, 72%, ${alpha})`;
+      ctx.lineWidth = 0.8 + t.vel; ctx.stroke();
+    }
+  }
+
   let geoT = 0;
-  function drawGeometry(dt, keyTop) {
-    geoT += dt * S.gspin;
+  function drawGeometry(dt, now, keyTop) {
+    updateLive(dt);
+    const react = S.greact;
+    geoT += dt * S.gspin * (1 + react * live.energy);
     if (S.gopacity <= 0 || keyTop < 40) return;
     const shape = currentShape();
     const R = Math.min(W * 0.48, keyTop * 0.54), cx = W / 2, cy = keyTop / 2;
@@ -419,7 +513,10 @@
     ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < shape.layers; i++) {
       const rot = i * GOLDEN + geoT * 0.25 * (1 + 0.23 * i) * (i % 2 ? -1 : 1);
-      const s = R * shape.scale ** i * (1 + 0.03 * Math.sin(geoT * 0.9 + i * 1.7));
+      const pos = shape.layers > 1 ? i / (shape.layers - 1) : 0.5; // layer's register, bass outside
+      const lv = react * bandAt(pos * (BANDS - 1));
+      const s = R * shape.scale ** i * (1 + 0.03 * Math.sin(geoT * 0.9 + i * 1.7))
+        * (1 + 0.1 * lv + 0.04 * react * live.energy);
       ctx.save();
       ctx.translate(cx, cy); ctx.rotate(rot); ctx.scale(s, s);
       ctx.beginPath();
@@ -428,12 +525,14 @@
       ctx.restore(); // the path keeps its transform; stroke width stays in screen pixels
 
       // Layers step through the same hue range as the keyboard, bass outside to treble inside
-      const hue = S.hue + S.spread * (shape.layers > 1 ? i / (shape.layers - 1) : 0.5), sat = S.gsat * 100;
-      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 60%, ${S.gopacity * shape.dim * 0.12})`;
-      ctx.lineWidth = 4; ctx.stroke();
-      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 66%, ${S.gopacity * shape.dim * 0.8})`;
+      const hue = S.hue + S.spread * pos + react * live.hue, sat = S.gsat * 100;
+      const alpha = S.gopacity * shape.dim * (1 + 1.2 * lv);
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, 60%, ${alpha * 0.12})`;
+      ctx.lineWidth = 4 + 3 * lv; ctx.stroke();
+      ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${66 + 12 * lv}%, ${Math.min(1, alpha * 0.8)})`;
       ctx.lineWidth = 1; ctx.stroke();
     }
+    if (react > 0) drawThreads(now, cx, cy, R, shape.sym || 6);
     ctx.restore();
   }
 
@@ -567,7 +666,7 @@
     ctx.fillStyle = 'rgba(255,255,255,0.035)';
     for (let n = LOW; n <= HIGH; n++) if (n % 12 === 0) ctx.fillRect(keyGeo[n].x * ww, 0, 1, keyTop);
 
-    drawGeometry(dt, keyTop);
+    drawGeometry(dt, now, keyTop);
     drawWeather(dt, now, keyTop);
 
     // Bars
