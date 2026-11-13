@@ -120,6 +120,9 @@
       { key: 'weather',   label: 'Weather',         min: 0,    max: 2,   step: 1,    def: 0, names: ['Off', 'Rain', 'Snow'] },
       { key: 'wamount',   label: 'Weather amount',  min: 0.05, max: 1,   step: 0.01, def: 0.5 },
     ] },
+    { title: 'Image', controls: [
+      { key: 'iopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.5 },
+    ] },
   ];
   const CONTROLS = GROUPS.flatMap(g => g.controls);
   const STORE = 'rach-viz-settings';
@@ -129,12 +132,13 @@
   const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch {} };
 
   const rows = document.getElementById('rows');
-  const inputs = {};
+  const inputs = {}, sections = {};
   for (const g of GROUPS) {
     const section = document.createElement('details');
     section.open = true;
     section.innerHTML = `<summary>${g.title}</summary>`;
     rows.appendChild(section);
+    sections[g.title] = section;
     for (const c of g.controls) {
       const row = document.createElement('div');
       row.className = 'row';
@@ -165,6 +169,65 @@
     save(); dropHash(); syncRows();
   };
   document.getElementById('random').onclick = randomize;
+
+  // ---------- Background image ----------
+  // An uploaded picture sits behind everything above the keyboard. It is scaled down once,
+  // kept in this browser only, and is not part of a preset.
+  const IMG_STORE = 'rach-viz-image', IMG_MAX = 2560;
+  let bgImage = null; // a canvas holding the picture, or null
+  {
+    const pair = document.createElement('div');
+    pair.className = 'pair';
+    pair.innerHTML = `<button>Upload image</button><button hidden>Remove</button>
+      <input type="file" accept="image/*" hidden>`;
+    const [uploadBtn, removeBtn, file] = pair.children;
+    sections.Image.insertBefore(pair, sections.Image.children[1]);
+    const show = img => {
+      const k = Math.min(1, IMG_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.naturalWidth * k));
+      c.height = Math.max(1, Math.round(img.naturalHeight * k));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      bgImage = c; removeBtn.hidden = false;
+      return c;
+    };
+    const load = (url, then) => {
+      const img = new Image();
+      img.onload = () => then(show(img));
+      img.onerror = () => then(null);
+      img.src = url;
+    };
+    uploadBtn.onclick = () => file.click();
+    file.onchange = () => {
+      const f = file.files[0];
+      file.value = '';
+      if (!f) return;
+      const url = URL.createObjectURL(f);
+      load(url, c => {
+        URL.revokeObjectURL(url);
+        if (!c) return flashLabel(uploadBtn, 'Not an image');
+        // Too big for storage: it still shows, but won't survive a reload
+        try { localStorage.setItem(IMG_STORE, c.toDataURL('image/jpeg', 0.85)); }
+        catch { try { localStorage.removeItem(IMG_STORE); } catch {} flashLabel(uploadBtn, 'Not saved'); }
+      });
+    };
+    removeBtn.onclick = () => {
+      bgImage = null; removeBtn.hidden = true;
+      try { localStorage.removeItem(IMG_STORE); } catch {}
+    };
+    let saved = null;
+    try { saved = localStorage.getItem(IMG_STORE); } catch {}
+    if (saved) load(saved, () => {});
+  }
+  // Fills the space above the keyboard, cropped to fit
+  function drawImage(keyTop) {
+    if (!bgImage || S.iopacity <= 0 || keyTop < 1) return;
+    const k = Math.max(W / bgImage.width, keyTop / bgImage.height);
+    const sw = W / k, sh = keyTop / k;
+    ctx.globalAlpha = S.iopacity;
+    ctx.drawImage(bgImage, (bgImage.width - sw) / 2, (bgImage.height - sh) / 2, sw, sh, 0, 0, W, keyTop);
+    ctx.globalAlpha = 1;
+  }
 
   // ---------- Presets ----------
   // A preset code is every slider as key=value, e.g. "speed=0.35&width=0.8&...".
@@ -844,6 +907,7 @@
       return g;
     });
     ctx.fillRect(0, 0, W, H);
+    drawImage(keyTop);
 
     // Octave guide lines
     ctx.fillStyle = 'rgba(255,255,255,0.035)';
