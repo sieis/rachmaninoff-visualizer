@@ -113,6 +113,9 @@
       { key: 'gspin',     label: 'Spin',            min: 0,    max: 3,   step: 0.01, def: 0.4 },
       { key: 'gopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.35 },
       { key: 'gsat',      label: 'Saturation',      min: 0,    max: 1,   step: 0.01, def: 0.8 },
+      { key: 'greveal',   label: 'Appears',         min: 0,    max: 1,   step: 1,    def: 0, names: ['Always', 'When played'] },
+      { key: 'gdraw',     label: 'Draw speed',      min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 },
+      { key: 'gfade',     label: 'Fade time',       min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 },
       { key: 'greact',    label: 'Play response',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
       { key: 'weather',   label: 'Weather',         min: 0,    max: 2,   step: 1,    def: 0, names: ['Off', 'Rain', 'Snow'] },
       { key: 'wamount',   label: 'Weather amount',  min: 0.05, max: 1,   step: 0.01, def: 0.5 },
@@ -140,14 +143,17 @@
       const input = row.querySelector('input'), out = row.querySelector('output');
       const show = () => out.textContent = c.names ? c.names[+input.value] : (+input.value).toFixed(c.step < 1 ? 2 : 0);
       input.value = S[c.key]; show();
-      input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); dropHash(); });
-      inputs[c.key] = { input, show };
+      input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); dropHash(); syncRows(); });
+      inputs[c.key] = { input, show, row };
       section.appendChild(row);
     }
   }
+  // Some sliders only apply in one mode; show them only then
+  function syncRows() { for (const c of CONTROLS) if (c.when) inputs[c.key].row.hidden = !c.when(); }
+  syncRows();
   document.getElementById('reset').onclick = () => {
     for (const c of CONTROLS) { S[c.key] = c.def; inputs[c.key].input.value = c.def; inputs[c.key].show(); }
-    save(); dropHash();
+    save(); dropHash(); syncRows();
   };
   // Every slider gets a uniform random value from its own range
   const randomize = () => {
@@ -156,7 +162,7 @@
       input.value = c.min + Math.random() * (c.max - c.min); // the range input snaps to its step
       S[c.key] = +input.value; show();
     }
-    save(); dropHash();
+    save(); dropHash(); syncRows();
   };
   document.getElementById('random').onclick = randomize;
 
@@ -176,7 +182,7 @@
       input.value = v; // the range input clamps and snaps to its step
       S[c.key] = +input.value; show(); found++;
     }
-    if (found) save();
+    if (found) { save(); syncRows(); }
     return found > 0;
   }
   // Once the sliders move, the preset in the address bar no longer describes them
@@ -397,6 +403,35 @@
     t => ({ layers: lerp(1, 5, t), scale: 0.62, lines: allPairs(ring(lerp(6, 22, t), 1)), circles: [[0, 0, 1]] }),
     t => ({ layers: lerp(1, 5, t), scale: 0.62, circles: disc(ring(lerp(8, 48, t), 0.5), 0.5) }),
   ];
+  // Strokes that are copies of each other under the figure's symmetry sit at the same distance
+  // from the centre and have the same size. Each such set is an orbit: one ring of matching strokes.
+  // Returns the orbits from the centre outward, each ordered by angle around the figure.
+  function orbitsOf(shape) {
+    const map = new Map();
+    const add = (r, size, item) => {
+      const key = Math.round(r * 500) + ':' + Math.round(size * 500);
+      if (!map.has(key)) map.set(key, { r, items: [] });
+      map.get(key).items.push(item);
+    };
+    for (let [x0, y0, x1, y1] of shape.lines || []) {
+      if (Math.hypot(x0, y0) > Math.hypot(x1, y1)) [x0, y0, x1, y1] = [x1, y1, x0, y0]; // lines grow outward
+      const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+      add(Math.hypot(mx, my), Math.hypot(x1 - x0, y1 - y0), { x: x0, y: y0, dx: x1 - x0, dy: y1 - y0, a: Math.atan2(my, mx) });
+    }
+    for (const [x, y, r] of shape.circles || []) {
+      const d = Math.hypot(x, y);
+      add(d, r + 9, { x, y, r, a: d > 1e-6 ? Math.atan2(y, x) : -Math.PI / 2, circle: true });
+    }
+    const orbits = [...map.values()].sort((p, q) => p.r - q.r).map(o => o.items.sort((p, q) => p.a - q.a));
+    // A figure with few orbits would light up whole from a note or two. Split the biggest
+    // into alternate strokes until there is one for every pitch class, or nothing left to split.
+    while (orbits.length < 12) {
+      const big = orbits.reduce((m, o) => o.length > m.length ? o : m);
+      if (big.length < 2) break;
+      orbits.splice(orbits.indexOf(big), 1, big.filter((_, k) => k % 2 === 0), big.filter((_, k) => k % 2));
+    }
+    return orbits;
+  }
   const shapeCache = new Map();
   function currentShape() {
     const key = S.gshape + ':' + S.gcomplex;
@@ -405,6 +440,7 @@
       // Dim dense shapes so their centres don't burn out to white
       const strokes = ((shape.lines || []).length + (shape.circles || []).length) * shape.layers;
       shape.dim = Math.min(1, Math.sqrt(900 / strokes));
+      shape.orbits = orbitsOf(shape);
       shapeCache.set(key, shape);
     }
     return shapeCache.get(key);
@@ -446,6 +482,8 @@
     if (!others.length) others.push(lastNote != null && bar.start - lastAt < 4000 ? lastNote : n);
     for (const m of others) threads.push({ a: m, b: n, vel, born: bar.start, bar });
     if (threads.length > MAX_THREADS) threads.splice(0, threads.length - MAX_THREADS);
+    lights.push(bar);
+    if (lights.length > MAX_LIGHTS) lights.shift();
     lastNote = n; lastAt = bar.start;
   }
 
@@ -469,15 +507,74 @@
 
   // A note's place in the figure: pitch class sets the angle inside a mirrored wedge,
   // height on the keyboard sets the radius, bass outside to treble inside.
+  const notePolar = (n, sym, R) => [((n * 7 % 12) + 0.5) / 12 * Math.PI / sym, R * (1 - 0.88 * pitchPos(n))];
+  // 1 while the note is down, then fading to 0. The longer it was held, the longer it lingers.
+  const linger = (bar, now, stretch = 1) =>
+    bar.end == null ? 1 : 1 - (now - bar.end) / ((1500 + Math.min(4500, (bar.end - bar.start) * 2)) * stretch);
+
+  // ---------- Appears: When played ----------
+  // The backdrop has no existence of its own. Each note draws a few rings of the figure's own
+  // strokes: its register picks the layer, bass outside to treble inside, and its pitch class
+  // picks which rings of that layer. The strokes draw themselves in one after another around
+  // the figure, flash on the attack, shimmer while the key is down, then unravel and fade.
+  const lights = [], MAX_LIGHTS = 80; // bars still lighting the figure
+  function drawLit(now, shape, cx, cy, tf) {
+    const orbits = shape.orbits, per = Math.min(12, orbits.length), L = shape.layers;
+    const strength = Math.min(1, S.gopacity * 2.5), sat = S.gsat * 100;
+    ctx.lineCap = 'round';
+    for (let i = lights.length - 1; i >= 0; i--) {
+      const b = lights[i], fade = linger(b, now, S.gfade);
+      if (fade <= 0) { lights.splice(i, 1); continue; }
+      const age = (now - b.start) / 1000 * S.gdraw, dur = 0.5 - 0.25 * b.vel; // louder notes draw faster
+      const q = (1 - fade) ** 2;      // how far the stroke has unravelled from its start
+      const hit = Math.exp(-(now - b.start) / 200); // attack flash
+      const f = pitchPos(b.note) * (L - 1), i0 = Math.floor(f);
+      for (const [li, wgt] of [[i0, 1 - (f - i0)], [i0 + 1, f - i0]]) {
+        if (li >= L || wgt < 0.15) continue;
+        ctx.save();
+        ctx.translate(cx, cy); ctx.rotate(tf[li][0]); ctx.scale(tf[li][1], tf[li][1]);
+        ctx.beginPath();
+        for (let o = (b.note * 7 % 12) % per; o < orbits.length; o += per) {
+          const items = orbits[o];
+          for (let k = 0; k < items.length; k++) {
+            const it = items[k];
+            // Each stroke in the ring starts a moment after its neighbour
+            const t = Math.min(1, Math.max(0, (age - 0.35 * k / items.length) / dur));
+            const p = 1 - (1 - t) ** 3;
+            if (p <= q) continue;
+            if (it.circle) {
+              // Circles close from the side facing the centre, both ways round
+              const a0 = it.a + Math.PI, a1 = a0 + Math.PI * q, a2 = a0 - Math.PI * p;
+              ctx.moveTo(it.x + Math.cos(a1) * it.r, it.y + Math.sin(a1) * it.r);
+              ctx.arc(it.x, it.y, it.r, a1, a0 + Math.PI * p);
+              ctx.moveTo(it.x + Math.cos(a2) * it.r, it.y + Math.sin(a2) * it.r);
+              ctx.arc(it.x, it.y, it.r, a2, a0 - Math.PI * q);
+            } else {
+              ctx.moveTo(it.x + it.dx * q, it.y + it.dy * q);
+              ctx.lineTo(it.x + it.dx * p, it.y + it.dy * p);
+            }
+          }
+        }
+        ctx.restore(); // the path keeps its transform; stroke width stays in screen pixels
+        const hue = hueOf(b.note) + S.greact * live.hue;
+        const shimmer = b.end == null ? 0.85 + 0.15 * Math.sin(now * 0.006 + b.note * 2.1) : 1;
+        const alpha = strength * fade * (0.45 + 0.55 * b.vel) * Math.sqrt(wgt) * shimmer;
+        ctx.strokeStyle = `hsla(${hue}, ${sat}%, 60%, ${alpha * 0.16})`;
+        ctx.lineWidth = 5 + 4 * b.vel + 6 * hit; ctx.stroke();
+        ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${68 + 24 * hit}%, ${alpha})`;
+        ctx.lineWidth = (0.8 + b.vel) * (1 + 0.8 * hit); ctx.stroke();
+      }
+    }
+  }
+
   function drawThreads(now, cx, cy, R, sym) {
-    const react = S.greact, wedge = Math.PI / sym, base = -Math.PI / 2 + geoT * 0.12;
+    const react = S.greact, base = -Math.PI / 2 + geoT * 0.12;
     const Rf = R * (1 + 0.06 * react * live.energy);
-    const polar = n => [((n * 7 % 12) + 0.5) / 12 * wedge, Rf * (1 - 0.88 * pitchPos(n))];
+    const polar = n => notePolar(n, sym, Rf);
     ctx.lineCap = 'round';
     for (let i = threads.length - 1; i >= 0; i--) {
-      const t = threads[i], end = t.bar.end;
-      // The longer the note was held, the longer its thread lingers
-      const a = end == null ? 1 : 1 - (now - end) / (1500 + Math.min(4500, (end - t.bar.start) * 2));
+      const t = threads[i];
+      const a = linger(t.bar, now);
       if (a <= 0) { threads.splice(i, 1); continue; }
       const [pa, ra] = polar(t.a), [pb, rb] = polar(t.b);
       ctx.beginPath();
@@ -508,15 +605,19 @@
     if (S.gopacity <= 0 || keyTop < 40) return;
     const shape = currentShape();
     const R = Math.min(W * 0.48, keyTop * 0.54), cx = W / 2, cy = keyTop / 2;
+    const sym = shape.sym || 6, reveal = S.greveal === 1;
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
     ctx.globalCompositeOperation = 'lighter';
+    const tf = []; // per layer: [rotation, scale]
     for (let i = 0; i < shape.layers; i++) {
       const rot = i * GOLDEN + geoT * 0.25 * (1 + 0.23 * i) * (i % 2 ? -1 : 1);
       const pos = shape.layers > 1 ? i / (shape.layers - 1) : 0.5; // layer's register, bass outside
       const lv = react * bandAt(pos * (BANDS - 1));
       const s = R * shape.scale ** i * (1 + 0.03 * Math.sin(geoT * 0.9 + i * 1.7))
         * (1 + 0.1 * lv + 0.04 * react * live.energy);
+      tf.push([rot, s]);
+      if (reveal) continue;
       ctx.save();
       ctx.translate(cx, cy); ctx.rotate(rot); ctx.scale(s, s);
       ctx.beginPath();
@@ -532,7 +633,8 @@
       ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${66 + 12 * lv}%, ${Math.min(1, alpha * 0.8)})`;
       ctx.lineWidth = 1; ctx.stroke();
     }
-    if (react > 0) drawThreads(now, cx, cy, R, shape.sym || 6);
+    if (reveal) drawLit(now, shape, cx, cy, tf);
+    if (react > 0) drawThreads(now, cx, cy, R, sym);
     ctx.restore();
   }
 
