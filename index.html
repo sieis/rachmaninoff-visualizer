@@ -128,10 +128,9 @@
     ] },
     { title: 'Geometry', controls: [
       // New shapes go on the end: a preset stores the shape as its place in this list
-      { key: 'gshape',    label: 'Shape',           min: 0,    max: 14,  step: 1,    def: 0, choice: true,
+      { key: 'gshape',    label: 'Shape',           min: 0,    max: 12,  step: 1,    def: 0, choice: true,
         names: ['Star weave', 'Lotus', 'Lattice', 'Flower of Life', "Metatron's Cube", 'Mystic Rose', 'Torus',
-          'Chladni plate', 'Phyllotaxis', 'Spirograph', 'Sri Yantra', 'Circle of fifths', 'Platonic solids',
-          'Penrose tiling', 'Girih star'] },
+          'Phyllotaxis', 'Spirograph', 'Circle of fifths', 'Platonic solids', 'Penrose tiling', 'Girih star'] },
       { key: 'gcomplex',  label: 'Complexity',      min: 1,    max: 10,  step: 1,    def: 5 },
       { key: 'gsize',     label: 'Size',            min: 0.3,  max: 2,   step: 0.01, def: 1 },
       { key: 'gline',     label: 'Line weight',     min: 0.3,  max: 4,   step: 0.05, def: 1 },
@@ -578,35 +577,6 @@
   const polar = (a, r = 1) => [Math.cos(a) * r, Math.sin(a) * r];
   const chain = pts => pts.slice(1).map((p, i) => [...pts[i], ...p]); // a polyline as separate lines
 
-  // Chladni plate: the lines where a vibrating square plate stays still, which is where sand
-  // collects. n and m count the waves each way; the lines are traced where the wave crosses zero.
-  const CHLADNI = [[1, 2, -1], [1, 2, 1], [1, 3, 1], [2, 3, -1], [1, 4, -1], [2, 4, 1], [3, 4, -1], [2, 5, 1], [3, 5, 1], [4, 5, -1]];
-  function chladni(n, m, sign) {
-    const N = 80, half = 0.7, lines = [];
-    const f = (x, y) => Math.cos(n * Math.PI * x) * Math.cos(m * Math.PI * y)
-      + sign * Math.cos(m * Math.PI * x) * Math.cos(n * Math.PI * y);
-    const v = [];
-    for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) v.push(f(2 * i / N - 1, 2 * j / N - 1)); // the plate runs -1 to 1
-    const at = (i, j) => v[j * (N + 1) + i];
-    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-      const corners = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]], cuts = [];
-      for (let k = 0; k < 4; k++) {
-        const [ai, aj] = corners[k], [bi, bj] = corners[(k + 1) % 4];
-        const a = at(ai, aj), b = at(bi, bj);
-        if ((a > 0) === (b > 0)) continue;
-        const u = a / (a - b);
-        cuts.push([((ai + (bi - ai) * u) / N * 2 - 1) * half, ((aj + (bj - aj) * u) / N * 2 - 1) * half]);
-      }
-      if (cuts.length === 2) lines.push([...cuts[0], ...cuts[1]]);
-      // Two lines pass through the cell: the middle of the cell says which corners they cut off
-      else if (cuts.length === 4) {
-        const o = (f((2 * i + 1) / N - 1, (2 * j + 1) / N - 1) > 0) === (at(i, j) > 0) ? 0 : 1;
-        lines.push([...cuts[o], ...cuts[(o + 1) % 4]], [...cuts[o + 2], ...cuts[(o + 3) % 4]]);
-      }
-    }
-    return [...lines, ...chain([[-half, -half], [half, -half], [half, half], [-half, half], [-half, -half]])];
-  }
-
   // Spirograph: a pen on a small wheel rolling inside a big one. The wheel is p/q the size of
   // the ring, which gives q lobes after p turns; pen is how far out along the spoke the pen sits.
   const SPIRO = [[3, 1, 1], [5, 2, 1], [4, 1, 0.6], [7, 3, 1], [6, 1, 1.5], [8, 3, 0.8], [9, 4, 1], [10, 3, 1.4], [12, 5, 0.9], [15, 7, 1]];
@@ -617,46 +587,6 @@
       pts.push([((1 - r) * Math.cos(a) + d * Math.cos(w * a)) * k, ((1 - r) * Math.sin(a) - d * Math.sin(w * a)) * k]);
     }
     return chain(pts);
-  }
-
-  // Sri Yantra: nine interlocking triangles, each [left corner x, base y, apex y] on a circle of
-  // radius 100 centred at 150, 150. Coordinates from Bhaskar Tripathi's solution, texample.net/sri-yantra.
-  const YANTRA = [[53.657, 123.205, 250], [52.984, 174.247, 50], [98.718, 220.038, 123.205], [78.265, 197.923, 78.105],
-    [90.486, 78.105, 160.66], [80.984, 103.122, 220.038], [114.949, 160.66, 103.122], [116.351, 134.308, 197.923],
-    [124.612, 144.798, 174.247]];
-  // A ring of n pointed petals between two radii
-  function petals(n, r0, r1) {
-    const lines = [];
-    for (let i = 0; i < n; i++) {
-      const pts = [];
-      for (let k = 0; k <= 12; k++) pts.push(polar(TAU * (i + k / 12) / n, r0 + (r1 - r0) * (1 - Math.abs(k / 6 - 1)) ** 0.6));
-      lines.push(...chain(pts));
-    }
-    return lines;
-  }
-  // Complexity adds the surrounding parts one by one: lotus rings, then the square with its four gates
-  function yantra(stage) {
-    let lines = YANTRA.flatMap(([x, by, ay]) => {
-      const l = (x - 150) / 100, b = (by - 150) / 100, a = (ay - 150) / 100;
-      return [[-l, b, l, b], [0, a, l, b], [0, a, -l, b]];
-    });
-    const circles = [[0, 0, 1]];
-    let reach = 1;
-    if (stage >= 1) circles.push([0, 0, 0.03]);
-    if (stage >= 2) { lines.push(...petals(8, 1, 1.22)); reach = 1.22; }
-    if (stage >= 3) circles.push([0, 0, 1.22]);
-    if (stage >= 4) { lines.push(...petals(16, 1.22, 1.42)); reach = 1.42; }
-    if (stage >= 5) circles.push([0, 0, 1.42]);
-    if (stage >= 6) { circles.push([0, 0, 1.48], [0, 0, 1.54]); reach = 1.54; }
-    for (let w = 0; w < stage - 6; w++) {
-      const h = 1.62 + 0.07 * w, g = 0.3, d = 0.13;
-      const side = [[-h, -h], [-g, -h], [-g, -h - d], [-2 * g, -h - d], [-2 * g, -h - 2 * d], [2 * g, -h - 2 * d],
-        [2 * g, -h - d], [g, -h - d], [g, -h], [h, -h]];
-      for (let q = 0; q < 4; q++) lines.push(...chain(side.map(([x, y]) => q % 2 ? [q === 1 ? -y : y, q === 1 ? x : -x] : [q ? -x : x, q ? -y : y])));
-      reach = 1.2 * (h + 2 * d); // the corners reach past the unit circle
-    }
-    lines = lines.map(l => l.map(v => v / reach));
-    return { lines, circles: circles.map(c => c.map(v => v / reach)) };
   }
 
   // Circle of fifths: the twelve notes on a ring, each a fifth from its neighbours, C at the top.
@@ -804,10 +734,8 @@
     },
     t => ({ layers: lerp(1, 5, t), scale: 0.62, lines: allPairs(ring(lerp(6, 22, t), 1)), circles: [[0, 0, 1]] }),
     t => ({ layers: lerp(1, 5, t), scale: 0.62, circles: disc(ring(lerp(8, 48, t), 0.5), 0.5) }),
-    (t, i) => ({ layers: i < 5 ? 1 : 2, scale: 0.5, sym: 4, fine: true, count: 150 + 40 * i, lines: chladni(...CHLADNI[i]) }),
     t => ({ layers: 1, scale: 1, sym: 5, fine: true, ...sunflower(t) }),
     (t, i) => ({ layers: lerp(2, 4, t), scale: 0.66, sym: SPIRO[i][0], fine: true, count: SPIRO[i][0] * SPIRO[i][1] * 6, lines: spiro(...SPIRO[i]) }),
-    (t, i) => ({ layers: 1, scale: 1, sym: 8, ...yantra(i) }),
     (t, i) => ({ layers: Math.max(1, i - 4), scale: 0.62, sym: 6, fifths: true, ...fifths(i) }),
     (t, i) => solids(NESTS[i]),
     (t, i) => ({ layers: 1, scale: 1, sym: 5, lines: penrose(...PENROSE[i]) }),
