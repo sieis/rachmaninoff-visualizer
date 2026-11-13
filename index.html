@@ -114,6 +114,8 @@
       { key: 'gopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.35 },
       { key: 'gsat',      label: 'Saturation',      min: 0,    max: 1,   step: 0.01, def: 0.8 },
       { key: 'greveal',   label: 'Appears',         min: 0,    max: 1,   step: 1,    def: 0, names: ['Always', 'When played'] },
+      { key: 'gdraw',     label: 'Draw speed',      min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 },
+      { key: 'gfade',     label: 'Fade time',       min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 },
       { key: 'greact',    label: 'Play response',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
       { key: 'weather',   label: 'Weather',         min: 0,    max: 2,   step: 1,    def: 0, names: ['Off', 'Rain', 'Snow'] },
       { key: 'wamount',   label: 'Weather amount',  min: 0.05, max: 1,   step: 0.01, def: 0.5 },
@@ -141,14 +143,17 @@
       const input = row.querySelector('input'), out = row.querySelector('output');
       const show = () => out.textContent = c.names ? c.names[+input.value] : (+input.value).toFixed(c.step < 1 ? 2 : 0);
       input.value = S[c.key]; show();
-      input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); dropHash(); });
-      inputs[c.key] = { input, show };
+      input.addEventListener('input', () => { S[c.key] = +input.value; show(); save(); dropHash(); syncRows(); });
+      inputs[c.key] = { input, show, row };
       section.appendChild(row);
     }
   }
+  // Some sliders only apply in one mode; show them only then
+  function syncRows() { for (const c of CONTROLS) if (c.when) inputs[c.key].row.hidden = !c.when(); }
+  syncRows();
   document.getElementById('reset').onclick = () => {
     for (const c of CONTROLS) { S[c.key] = c.def; inputs[c.key].input.value = c.def; inputs[c.key].show(); }
-    save(); dropHash();
+    save(); dropHash(); syncRows();
   };
   // Every slider gets a uniform random value from its own range
   const randomize = () => {
@@ -157,7 +162,7 @@
       input.value = c.min + Math.random() * (c.max - c.min); // the range input snaps to its step
       S[c.key] = +input.value; show();
     }
-    save(); dropHash();
+    save(); dropHash(); syncRows();
   };
   document.getElementById('random').onclick = randomize;
 
@@ -177,7 +182,7 @@
       input.value = v; // the range input clamps and snaps to its step
       S[c.key] = +input.value; show(); found++;
     }
-    if (found) save();
+    if (found) { save(); syncRows(); }
     return found > 0;
   }
   // Once the sliders move, the preset in the address bar no longer describes them
@@ -504,8 +509,8 @@
   // height on the keyboard sets the radius, bass outside to treble inside.
   const notePolar = (n, sym, R) => [((n * 7 % 12) + 0.5) / 12 * Math.PI / sym, R * (1 - 0.88 * pitchPos(n))];
   // 1 while the note is down, then fading to 0. The longer it was held, the longer it lingers.
-  const linger = (bar, now) =>
-    bar.end == null ? 1 : 1 - (now - bar.end) / (1500 + Math.min(4500, (bar.end - bar.start) * 2));
+  const linger = (bar, now, stretch = 1) =>
+    bar.end == null ? 1 : 1 - (now - bar.end) / ((1500 + Math.min(4500, (bar.end - bar.start) * 2)) * stretch);
 
   // ---------- Appears: When played ----------
   // The backdrop has no existence of its own. Each note draws a few rings of the figure's own
@@ -518,11 +523,11 @@
     const strength = Math.min(1, S.gopacity * 2.5), sat = S.gsat * 100;
     ctx.lineCap = 'round';
     for (let i = lights.length - 1; i >= 0; i--) {
-      const b = lights[i], fade = linger(b, now);
+      const b = lights[i], fade = linger(b, now, S.gfade);
       if (fade <= 0) { lights.splice(i, 1); continue; }
-      const age = (now - b.start) / 1000, dur = 0.5 - 0.25 * b.vel; // louder notes draw faster
+      const age = (now - b.start) / 1000 * S.gdraw, dur = 0.5 - 0.25 * b.vel; // louder notes draw faster
       const q = (1 - fade) ** 2;      // how far the stroke has unravelled from its start
-      const hit = Math.exp(-age * 5); // attack flash
+      const hit = Math.exp(-(now - b.start) / 200); // attack flash
       const f = pitchPos(b.note) * (L - 1), i0 = Math.floor(f);
       for (const [li, wgt] of [[i0, 1 - (f - i0)], [i0 + 1, f - i0]]) {
         if (li >= L || wgt < 0.15) continue;
