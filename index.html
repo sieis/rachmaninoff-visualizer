@@ -120,8 +120,9 @@
       { key: 'wiggle',    label: 'Wiggle',          min: 0,    max: 1,   step: 0.01, def: 0 },
       { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
       { key: 'vsens',     label: 'Velocity sensitivity', min: 0, max: 1, step: 0.01, def: 0.5 },
-      { key: 'hue',       label: 'Color',           min: 0,    max: 360, step: 1,    def: 215, color: true },
-      { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
+      { key: 'hue',       label: 'Start color',     min: 0,    max: 360, step: 1,    def: 215, color: true },
+      // Stored as degrees of hue past the start color, so the two move together when the start changes
+      { key: 'spread',    label: 'End color',       min: -360, max: 360, step: 1,    def: 110, color: true, from: 'hue' },
       { key: 'cmode',     label: 'Color by',        min: 0,    max: 2,   step: 1,    def: 0, names: ['Pitch', 'Pitch class', 'Velocity'] },
       { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
     ] },
@@ -179,7 +180,7 @@
     section.innerHTML = `<summary>${g.title}</summary>`;
     for (const c of g.controls) {
       const row = document.createElement('div');
-      let set; // takes any number, keeps the nearest value the control allows
+      let set, refresh; // set takes any number and keeps the nearest value the control allows
       if (c.choice) {
         row.className = 'chips';
         row.setAttribute('role', 'radiogroup');
@@ -207,15 +208,23 @@
           if (d < 8) return null; // a grey has no hue
           return Math.round(60 * (hi === r ? ((g - b) / d + 6) % 6 : hi === g ? (b - r) / d + 2 : (r - g) / d + 4)) % 360;
         };
-        set = v => {
-          S[c.key] = Math.min(c.max, Math.max(c.min, Math.round(v) || 0));
-          input.value = hex(S[c.key]); out.textContent = S[c.key];
+        const base = () => c.from ? S[c.from] : 0;
+        let picking = false; // the swatch is left alone while its picker is open
+        const paint = () => {
+          if (!picking) input.value = hex(((base() + S[c.key]) % 360 + 360) % 360);
+          out.textContent = (c.from && S[c.key] > 0 ? '+' : '') + S[c.key] + '°';
         };
+        set = v => { S[c.key] = Math.min(c.max, Math.max(c.min, Math.round(v) || 0)); paint(); };
+        refresh = paint;
         input.addEventListener('input', () => {
           const h = hueIn(input.value);
-          if (h != null) { S[c.key] = h; out.textContent = h; changed(); }
+          if (h == null) return;
+          picking = true;
+          // An end color is reached the short way round the wheel from the start
+          S[c.key] = c.from ? ((h - base()) % 360 + 540) % 360 - 180 : h;
+          changed();
         });
-        input.addEventListener('change', () => { set(S[c.key]); input.blur(); });
+        input.addEventListener('change', () => { picking = false; paint(); input.blur(); });
       } else {
         row.className = 'row';
         row.innerHTML = `<label><span>${c.label}</span><output></output></label>
@@ -227,7 +236,7 @@
         input.addEventListener('input', () => { S[c.key] = +input.value; show(); changed(); });
       }
       set(S[c.key]);
-      inputs[c.key] = { set, row };
+      inputs[c.key] = { set, row, refresh };
       section.appendChild(row);
     }
   }
@@ -237,8 +246,13 @@
     rows.appendChild(col);
     col.append(...titles.map(t => sections[t]));
   }
-  // Some sliders only apply in one mode; show them only then
-  function syncRows() { for (const c of CONTROLS) if (c.when) inputs[c.key].row.hidden = !c.when(); }
+  // Some sliders only apply in one mode; show them only then. Swatches follow the colors they depend on.
+  function syncRows() {
+    for (const c of CONTROLS) {
+      if (c.when) inputs[c.key].row.hidden = !c.when();
+      inputs[c.key].refresh?.();
+    }
+  }
   syncRows();
   document.getElementById('reset').onclick = () => {
     for (const c of CONTROLS) inputs[c.key].set(c.def);
