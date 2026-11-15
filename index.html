@@ -150,6 +150,7 @@
       { key: 'gdraw',     label: 'Draw speed',      min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 || S.nmode === 2 },
       { key: 'gfade',     label: 'Fade time',       min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 || S.nmode === 2 },
       { key: 'gspread',   label: 'Spread time',     min: 0.2,  max: 8,   step: 0.1,  def: 2.5, when: () => S.nmode === 2 },
+      { key: 'ghold',     label: 'Held notes',      min: 0,    max: 1,   step: 1,    def: 1, names: ['Stop spreading', 'Keep spreading'], when: () => S.nmode === 2 },
       { key: 'greact',    label: 'Play response',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
     ] },
     { title: 'Weather', controls: [
@@ -1108,8 +1109,9 @@
       if (w.p >= 1 && !w.segs) { w.segs = spread(w.graph, w.node); w.hitAt ??= now; w.grown ||= 0.08; }
       let fade = 1;
       // Once landed, the colour runs for the Spread time whether or not the key is still down.
+      // With Held notes set to Keep spreading it also runs for as long as the wire feeds it.
       // It fades after that, and after the whole wire has gone in.
-      if (w.p >= 1 && now - w.hitAt < S.gspread * 1000) w.grown += dt * 0.9 * S.gdraw * (0.5 + b.vel);
+      if (w.p >= 1 && (now - w.hitAt < S.gspread * 1000 || (S.ghold && w.q < 1))) w.grown += dt * 0.9 * S.gdraw * (0.5 + b.vel);
       else if (w.q >= 1) {
         w.doneAt ??= now;
         fade = 1 - (now - w.doneAt) / ((1500 + Math.min(4500, (b.end - b.start) * 2)) * S.gfade);
