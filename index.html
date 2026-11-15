@@ -120,7 +120,7 @@
       { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
       { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
       { key: 'cmode',     label: 'Color by',        min: 0,    max: 2,   step: 1,    def: 0, names: ['Pitch', 'Pitch class', 'Velocity'], when: () => S.nmode > 0 },
-      { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16, when: () => S.nmode > 0 },
+      { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
     ] },
     { title: 'Particles', controls: [
       { key: 'particles', label: 'Amount',          min: 0,    max: 1,   step: 0.01, def: 0.4 },
@@ -143,11 +143,13 @@
       { key: 'gsat',      label: 'Saturation',      min: 0,    max: 1,   step: 0.01, def: 0.8, when: () => S.nmode !== 2 },
     ] },
     // In Wireframe mode the figure is always there in grey, and Draw speed and Fade time set
-    // how fast colour runs along its wires and how long it stays
+    // how fast colour runs along its wires and how long it stays. Spread time is how long the
+    // colour keeps running after a wire lands, however short the note was.
     { title: 'Reaction', controls: [
       { key: 'greveal',   label: 'Geometry appears', min: 0,   max: 1,   step: 1,    def: 0, names: ['Always', 'When played'], when: () => S.nmode !== 2 },
       { key: 'gdraw',     label: 'Draw speed',      min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 || S.nmode === 2 },
       { key: 'gfade',     label: 'Fade time',       min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 || S.nmode === 2 },
+      { key: 'gspread',   label: 'Spread time',     min: 0.2,  max: 8,   step: 0.1,  def: 2.5, when: () => S.nmode === 2 },
       { key: 'greact',    label: 'Play response',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
     ] },
     { title: 'Weather', controls: [
@@ -1060,7 +1062,7 @@
     const { nodes, adj } = g, N = nodes.length, used = new Set(), segs = [], opts = [];
     const walkers = [];
     for (let k = Math.min(3, adj[start].length); k > 0; k--) walkers.push({ at: start, from: -1, d: 0 });
-    while (walkers.length && segs.length < 1200) {
+    while (walkers.length && segs.length < 2500) {
       let wi = 0; // the walker that has run the least goes next, so the threads grow evenly
       for (let k = 1; k < walkers.length; k++) if (walkers[k].d < walkers[wi].d) wi = k;
       const w = walkers[wi], [x, y] = nodes[w.at];
@@ -1076,7 +1078,7 @@
         }
         opts.push(nb, wt, len); total += wt;
       }
-      if (!opts.length || w.d > 3) { walkers.splice(wi, 1); continue; }
+      if (!opts.length || w.d > 6) { walkers.splice(wi, 1); continue; }
       let k = 0;
       for (let r = Math.random() * total; k < opts.length - 3 && (r -= opts[k + 1]) > 0;) k += 3;
       const nb = opts[k], len = opts[k + 2];
@@ -1105,11 +1107,14 @@
       if (b.end != null) w.q = Math.min(w.p, w.q + step);
       if (w.p >= 1 && !w.segs) { w.segs = spread(w.graph, w.node); w.hitAt ??= now; w.grown ||= 0.08; }
       let fade = 1;
-      if (w.q >= 1) { // the whole wire has gone in: the threads stop growing and fade
+      // Once landed, the colour runs for the Spread time whether or not the key is still down.
+      // It fades after that, and after the whole wire has gone in.
+      if (w.p >= 1 && now - w.hitAt < S.gspread * 1000) w.grown += dt * 0.9 * S.gdraw * (0.5 + b.vel);
+      else if (w.q >= 1) {
         w.doneAt ??= now;
         fade = 1 - (now - w.doneAt) / ((1500 + Math.min(4500, (b.end - b.start) * 2)) * S.gfade);
         if (fade <= 0) { wires.splice(i, 1); continue; }
-      } else if (w.p >= 1) w.grown += dt * 0.9 * S.gdraw * (0.5 + b.vel);
+      }
 
       const hue = hueOf(b.note, b.vel), ve = feel(b.vel), glow = 0.4 + S.glow;
       const light = 56 + 14 * ve, alpha = fade * Math.min(1, 0.45 + 0.55 * ve);
