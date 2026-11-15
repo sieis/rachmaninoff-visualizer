@@ -34,15 +34,22 @@
   button:hover { background: rgba(40, 44, 62, .92); }
 
   #panel {
-    position: fixed; top: 60px; right: 14px; width: min(980px, calc(100vw - 28px)); padding: 14px 16px 12px;
+    position: fixed; top: 60px; right: 14px; width: max-content; max-width: calc(100vw - 28px); padding: 14px 16px 12px;
     border-radius: 16px; background: rgba(18, 20, 30, .85); border: 1px solid rgba(255, 255, 255, .08);
     max-height: calc(100vh - 74px); overflow-y: auto;
-    /* One column per section; they wrap onto fewer columns when the window is narrow */
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0 22px; align-items: start;
   }
   #panel[hidden] { display: none; }
-  #rows { display: contents; }
+  /* A column per group of sections; they wrap when the window is narrow. A column whose sections
+     are all closed is only as wide as its headings, so the panel shrinks around what is open. */
+  #rows { display: flex; flex-wrap: wrap; gap: 0 22px; align-items: flex-start; }
+  #rows > div { width: 215px; }
+  #rows > div:not(:has(details[open])) { width: auto; }
+  @media (max-width: 520px) {
+    #panel:has(details[open]) { width: calc(100vw - 28px); }
+    #rows > div:has(details[open]) { width: 100%; }
+  }
   details { margin-bottom: 10px; min-width: 0; }
+  details:not([open]) summary { margin-bottom: 0; }
   summary {
     cursor: pointer; margin-bottom: 10px; color: #dfe3ee; font-weight: 600;
     letter-spacing: .08em; text-transform: uppercase; font-size: 11px;
@@ -1138,7 +1145,7 @@
         //   Sparks    particles thrown off the growing tips, and a few shed along the threads
         const fx = fade * (growing ? 1 : 0.35), tick = now / 55 | 0;
         const hi = S.gshimmer > 0 ? new Path2D() : null, zap = S.gelectric > 0 ? new Path2D() : null;
-        const tips = growing && S.gsparks > 0, shed = S.gsparks > 0 ? Math.floor(S.gsparks * 9 * fx * dt + Math.random()) : 0;
+        const tips = growing && S.gsparks > 0, shed = S.gsparks > 0 ? Math.floor(S.gsparks * 60 * fx * dt + Math.random()) : 0;
         const at = (x, y) => [cx + x * cos - y * sin, cy + x * sin + y * cos]; // figure to screen
         let k = 0;
         for (const sg of w.segs) {
@@ -1148,17 +1155,17 @@
           ctx.moveTo(A[0], A[1]); ctx.lineTo(ex, ey);
           k++;
           const pulse = hi && Math.sin(sg[2] * 14 - now * 0.006 + b.note) > 0.6;
-          const arc = zap && noise(k, tick) < 0.06 + 0.3 * S.gelectric;
+          const arc = zap && noise(k, tick) < 0.04 + 0.2 * S.gelectric;
           if (!pulse && !arc && !(tips && t < 1)) continue;
           const [x0, y0] = at(A[0], A[1]), [x1, y1] = at(ex, ey);
           if (pulse) { hi.moveTo(x0, y0); hi.lineTo(x1, y1); }
           if (arc) {
             const len = Math.hypot(x1 - x0, y1 - y0) || 1;
-            const kick = Math.min(len * 0.6, 3 + 10 * S.gelectric) * (noise(k + 0.5, tick) * 2 - 1) / len;
+            const kick = Math.min(len * 0.6, 2 + 7 * S.gelectric) * (noise(k + 0.5, tick) * 2 - 1) / len;
             zap.moveTo(x0, y0); zap.lineTo((x0 + x1) / 2 - (y1 - y0) * kick, (y0 + y1) / 2 + (x1 - x0) * kick); zap.lineTo(x1, y1);
           }
-          if (tips && t < 1) for (let n = Math.floor(S.gsparks * 45 * dt + Math.random()); n > 0; n--)
-            spawn(x1, y1, (Math.random() - 0.5) * 110, (Math.random() - 0.5) * 110, 0.2 + Math.random() * 0.5, 0.5 + Math.random() * 1.1, hue + (Math.random() - 0.5) * 30);
+          if (tips && t < 1) for (let n = Math.floor(S.gsparks * 200 * dt + Math.random()); n > 0; n--)
+            spawn(x1, y1, (Math.random() - 0.5) * 170, (Math.random() - 0.5) * 170, 0.3 + Math.random() * 0.7, 0.7 + Math.random() * 1.6, hue + (Math.random() - 0.5) * 30);
         }
         for (let n = shed; n > 0 && k; n--) {
           const sg = w.segs[Math.random() * k | 0], A = nodes[sg[0]], B = nodes[sg[1]], t = Math.random() * Math.min(1, (w.grown - sg[2]) / sg[3]);
@@ -1172,11 +1179,11 @@
         ctx.strokeStyle = `hsla(${hue}, 95%, ${light + 8}%, ${alpha})`;
         ctx.lineWidth = (0.9 + b.vel) * S.gline; ctx.stroke();
         if (hi) {
-          ctx.strokeStyle = `hsla(${hue}, 100%, 90%, ${fx * Math.min(1, S.gshimmer * 1.3)})`;
+          ctx.strokeStyle = `hsla(${hue}, 100%, 90%, ${fx * S.gshimmer * 0.8})`;
           ctx.lineWidth = (1.3 + b.vel) * S.gline * 1.5; ctx.stroke(hi);
         }
         if (zap) {
-          ctx.strokeStyle = `hsla(${hue}, 70%, 92%, ${fx * (0.5 + 0.5 * S.gelectric)})`;
+          ctx.strokeStyle = `hsla(${hue}, 70%, 92%, ${fx * (0.4 + 0.4 * S.gelectric)})`;
           ctx.lineWidth = Math.max(1, 0.8 * S.gline); ctx.stroke(zap);
         }
         if (hit > 0.02) {
