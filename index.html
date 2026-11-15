@@ -34,15 +34,22 @@
   button:hover { background: rgba(40, 44, 62, .92); }
 
   #panel {
-    position: fixed; top: 60px; right: 14px; width: min(980px, calc(100vw - 28px)); padding: 14px 16px 12px;
+    position: fixed; top: 60px; right: 14px; width: max-content; max-width: calc(100vw - 28px); padding: 14px 16px 12px;
     border-radius: 16px; background: rgba(18, 20, 30, .85); border: 1px solid rgba(255, 255, 255, .08);
     max-height: calc(100vh - 74px); overflow-y: auto;
-    /* One column per section; they wrap onto fewer columns when the window is narrow */
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0 22px; align-items: start;
   }
   #panel[hidden] { display: none; }
-  #rows { display: contents; }
+  /* A column per group of sections; they wrap when the window is narrow. A column whose sections
+     are all closed is only as wide as its headings, so the panel shrinks around what is open. */
+  #rows { display: flex; flex-wrap: wrap; gap: 0 22px; align-items: flex-start; }
+  #rows > div { width: 215px; }
+  #rows > div:not(:has(details[open])) { width: auto; }
+  @media (max-width: 520px) {
+    #panel:has(details[open]) { width: calc(100vw - 28px); }
+    #rows > div:has(details[open]) { width: 100%; }
+  }
   details { margin-bottom: 10px; min-width: 0; }
+  details:not([open]) summary { margin-bottom: 0; }
   summary {
     cursor: pointer; margin-bottom: 10px; color: #dfe3ee; font-weight: 600;
     letter-spacing: .08em; text-transform: uppercase; font-size: 11px;
@@ -107,15 +114,19 @@
   // ---------- Settings ----------
   const GROUPS = [
     { title: 'Keyboard', controls: [
-      { key: 'speed',     label: 'Speed',           min: 0.05, max: 1.5, step: 0.01, def: 0.35 },
-      { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8 },
-      { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5 },
-      { key: 'wiggle',    label: 'Wiggle',          min: 0,    max: 1,   step: 0.01, def: 0 },
+      // What a played note sends up the screen: nothing (the keys alone light up), a bar, or a
+      // wire that runs to the backdrop and colours it. Each mode shows only the sliders it uses.
+      { key: 'nmode',     label: 'Notes',           min: 0,    max: 2,   step: 1,    def: 1, choice: true,
+        names: ['Off', 'Note visualizer', 'Wireframe'] },
+      { key: 'speed',     label: 'Speed',           min: 0.05, max: 1.5, step: 0.01, def: 0.35, when: () => S.nmode > 0 },
+      { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8,  when: () => S.nmode > 0 },
+      { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5,  when: () => S.nmode === 1 },
+      { key: 'wiggle',    label: 'Wiggle',          min: 0,    max: 1,   step: 0.01, def: 0,    when: () => S.nmode === 1 },
       { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
-      { key: 'vsens',     label: 'Velocity sensitivity', min: 0, max: 1, step: 0.01, def: 0.5 },
+      { key: 'vsens',     label: 'Velocity sensitivity', min: 0, max: 1, step: 0.01, def: 0.5,  when: () => S.nmode > 0 },
       { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
       { key: 'spread',    label: 'Color spread',    min: 0,    max: 360, step: 1,    def: 110 },
-      { key: 'cmode',     label: 'Color by',        min: 0,    max: 2,   step: 1,    def: 0, names: ['Pitch', 'Pitch class', 'Velocity'] },
+      { key: 'cmode',     label: 'Color by',        min: 0,    max: 2,   step: 1,    def: 0, names: ['Pitch', 'Pitch class', 'Velocity'], when: () => S.nmode > 0 },
       { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
     ] },
     { title: 'Particles', controls: [
@@ -124,7 +135,7 @@
       { key: 'pspread',   label: 'Spread',          min: 0,    max: 3,   step: 0.01, def: 1 },
       { key: 'psize',     label: 'Size',            min: 0.3,  max: 3,   step: 0.01, def: 1 },
       { key: 'plife',     label: 'Lifetime',        min: 0.3,  max: 3,   step: 0.01, def: 1 },
-      { key: 'shed',      label: 'Note shedding',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
+      { key: 'shed',      label: 'Note shedding',   min: 0,    max: 1,   step: 0.01, def: 0.4, when: () => S.nmode === 1 },
     ] },
     { title: 'Geometry', controls: [
       // New shapes go on the end: a preset stores the shape as its place in this list
@@ -136,12 +147,21 @@
       { key: 'gline',     label: 'Line weight',     min: 0.3,  max: 4,   step: 0.05, def: 1 },
       { key: 'gspin',     label: 'Spin',            min: -3,   max: 3,   step: 0.01, def: 0.4 },
       { key: 'gopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.35 },
-      { key: 'gsat',      label: 'Saturation',      min: 0,    max: 1,   step: 0.01, def: 0.8 },
+      { key: 'gsat',      label: 'Saturation',      min: 0,    max: 1,   step: 0.01, def: 0.8, when: () => S.nmode !== 2 },
     ] },
+    // In Wireframe mode the figure is always there in grey, and Draw speed and Fade time set
+    // how fast colour runs along its wires and how long it stays. Spread time is how long the
+    // colour keeps running after a wire lands, however short the note was.
     { title: 'Reaction', controls: [
-      { key: 'greveal',   label: 'Geometry appears', min: 0,   max: 1,   step: 1,    def: 0, names: ['Always', 'When played'] },
-      { key: 'gdraw',     label: 'Draw speed',      min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 },
-      { key: 'gfade',     label: 'Fade time',       min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 },
+      { key: 'greveal',   label: 'Geometry appears', min: 0,   max: 1,   step: 1,    def: 0, names: ['Always', 'When played'], when: () => S.nmode !== 2 },
+      { key: 'gdraw',     label: 'Draw speed',      min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 || S.nmode === 2 },
+      { key: 'gfade',     label: 'Fade time',       min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 || S.nmode === 2 },
+      { key: 'gspread',   label: 'Spread time',     min: 0.2,  max: 8,   step: 0.1,  def: 2.5, when: () => S.nmode === 2 },
+      { key: 'ghold',     label: 'Held notes',      min: 0,    max: 1,   step: 1,    def: 1, names: ['Stop spreading', 'Keep spreading'], when: () => S.nmode === 2 },
+      // Small effects on the coloured threads, strongest while they are still being drawn
+      { key: 'gshimmer',  label: 'Shimmer',         min: 0,    max: 1,   step: 0.01, def: 0.3,  when: () => S.nmode === 2 },
+      { key: 'gelectric', label: 'Electric',        min: 0,    max: 1,   step: 0.01, def: 0,    when: () => S.nmode === 2 },
+      { key: 'gsparks',   label: 'Sparks',          min: 0,    max: 1,   step: 0.01, def: 0.25, when: () => S.nmode === 2 },
       { key: 'greact',    label: 'Play response',   min: 0,    max: 1,   step: 0.01, def: 0.4 },
     ] },
     { title: 'Weather', controls: [
@@ -438,11 +458,16 @@
     held.set(n, bar); bars.push(bar);
     flash[n] = 1; lastVel[n] = vel;
     feed(bar);
+    if (S.nmode === 2) {
+      wires.push({ bar, p: 0, q: 0, grown: 0 });
+      if (wires.length > MAX_WIRES) wires.shift();
+    }
     burst(n, vel, Math.round(amount() * 0.5 * (0.4 + vel)));
   }
   function noteOff(n) {
     const bar = held.get(n);
     if (bar) { bar.end = performance.now(); held.delete(n); }
+    if (S.nmode === 0) flash[n] = Math.max(flash[n], 0.7); // with no bar, the key itself fades out
   }
 
   // Particle slider is curved so the top of its range gets wild
@@ -633,8 +658,14 @@
   // Outside to inside: one solid alone, then pairs that mirror each other, up to all five in Kepler's order
   const NESTS = [[0], [1], [2], [3], [4], [1, 2], [3, 4], [4, 3, 1], [3, 4, 1, 2], [1, 0, 3, 4, 2]];
   function solids(nest) {
-    const parts = nest.map(k => ({ ...SOLIDS[k], items: SOLIDS[k].edges.map(() => ({})) }));
+    const parts = nest.map(k => ({ ...SOLIDS[k], items: SOLIDS[k].edges.map(() => ({})), nodes: [] }));
     return {
+      // One wire graph per solid; its corners move, so update refills nodes every frame
+      graphs: parts.map(sd => {
+        const adj = sd.verts.map(() => []);
+        for (const [a, b] of sd.edges) { adj[a].push(b); adj[b].push(a); }
+        return { nodes: sd.nodes, adj, rim: sd.verts.map((_, k) => k) };
+      }),
       layers: nest.length, scale: 0.6, sym: 6, paths: [],
       count: parts.reduce((n, s) => n + s.edges.length, 0),
       layerOrbits: parts.map(s => s.items.map(it => [it])),
@@ -647,6 +678,7 @@
             const k = 3.2 / (3.2 - z2) * 0.76; // nearer corners loom larger
             return [x1 * k, y1 * k];
           });
+          pts.forEach((p, k) => sd.nodes[k] = p);
           const path = this.paths[i] = new Path2D();
           sd.edges.forEach(([a, b], j) => {
             const [x0, y0] = pts[a], [x1, y1] = pts[b], it = sd.items[j];
@@ -967,15 +999,229 @@
     }
   }
 
+  // ---------- Wireframe ----------
+  // A note fires a wire from its key to a point on the rim of the backdrop, which is drawn in
+  // grey. Where the wire lands, the note's colour runs into the figure as threads that follow
+  // the figure's own lines, for as long as the key feeds it.
+  const wires = [], MAX_WIRES = 80; // { bar, p, q, grown, shape, layer, graph, node, segs }
+
+  // The figure as a graph: a node wherever strokes meet or cross, an edge for each piece of
+  // stroke between two nodes. Circles are cut into short chords.
+  function buildGraph(shape) {
+    const segs = [...(shape.lines || [])];
+    for (const [x, y, r] of shape.circles || []) {
+      const n = Math.max(8, Math.min(64, Math.ceil(r * 64)));
+      for (let k = 0; k < n; k++) {
+        const a = TAU * k / n, b = TAU * (k + 1) / n;
+        segs.push([x + Math.cos(a) * r, y + Math.sin(a) * r, x + Math.cos(b) * r, y + Math.sin(b) * r]);
+      }
+    }
+    // Where two strokes cross, or one ends on another, both are cut. The densest figures are
+    // made of short pieces that already meet end to end, so they skip this.
+    const cuts = segs.map(() => [0, 1]), E = 1e-7;
+    if (segs.length <= 2500) for (let i = 0; i < segs.length; i++) {
+      const a = segs[i], ax = a[0], ay = a[1], rx = a[2] - ax, ry = a[3] - ay;
+      const lox = Math.min(ax, a[2]) - E, hix = Math.max(ax, a[2]) + E, loy = Math.min(ay, a[3]) - E, hiy = Math.max(ay, a[3]) + E;
+      for (let j = i + 1; j < segs.length; j++) {
+        const c = segs[j], cx = c[0], cy = c[1], dx = c[2], dy = c[3];
+        if ((cx < lox && dx < lox) || (cx > hix && dx > hix) || (cy < loy && dy < loy) || (cy > hiy && dy > hiy)) continue;
+        const sx = dx - cx, sy = dy - cy, den = rx * sy - ry * sx;
+        if (Math.abs(den) < 1e-12) continue;
+        const t = ((cx - ax) * sy - (cy - ay) * sx) / den, u = ((cx - ax) * ry - (cy - ay) * rx) / den;
+        if (t < -E || t > 1 + E || u < -E || u > 1 + E) continue;
+        if (t > E && t < 1 - E) cuts[i].push(t);
+        if (u > E && u < 1 - E) cuts[j].push(u);
+      }
+    }
+    const nodes = [], adj = [], ids = new Map();
+    const id = (x, y) => {
+      const key = Math.round(x * 1e4) + ',' + Math.round(y * 1e4);
+      let k = ids.get(key);
+      if (k == null) { ids.set(key, k = nodes.length); nodes.push([x, y]); adj.push([]); }
+      return k;
+    };
+    segs.forEach(([ax, ay, bx, by], i) => {
+      const ts = cuts[i].sort((p, q) => p - q);
+      let a = id(ax, ay);
+      for (let k = 1; k < ts.length; k++) {
+        const b = id(ax + (bx - ax) * ts[k], ay + (by - ay) * ts[k]);
+        if (b !== a && !adj[a].includes(b)) { adj[a].push(b); adj[b].push(a); }
+        a = b;
+      }
+    });
+    // The rim: nodes in the outer fifth of the figure
+    const rad = nodes.map(p => Math.hypot(p[0], p[1])), far = rad.reduce((m, r) => Math.max(m, r), 0);
+    const rim = [];
+    rad.forEach((r, k) => { if (r >= far * 0.8) rim.push(k); });
+    return { nodes, adj, rim };
+  }
+  // One graph per layer. Layers of a flat figure are copies of each other and share one.
+  const graphsOf = shape => shape.graphs ??= Array(shape.layers).fill(buildGraph(shape));
+
+  // Picks where a wire lands: a random rim node, on a layer chosen in proportion to its size
+  function aim(w, shape) {
+    const graphs = graphsOf(shape);
+    let li = 0, pick = Math.random() * graphs.reduce((sum, g, i) => sum + shape.scale ** i, 0);
+    while (li < graphs.length - 1 && (pick -= shape.scale ** li) > 0) li++;
+    w.shape = shape; w.layer = li; w.graph = graphs[li]; w.segs = null;
+    w.node = w.graph.rim[Math.random() * w.graph.rim.length | 0] || 0;
+  }
+
+  // The threads a hit sends through the figure, as edges [from, to, distance run before it, length]
+  // in the order the colour reaches them. A few walkers leave the node. Each prefers to carry
+  // straight on, takes no edge twice, and now and then splits in two at a junction.
+  function spread(g, start) {
+    const { nodes, adj } = g, N = nodes.length, used = new Set(), segs = [], opts = [];
+    const walkers = [];
+    for (let k = Math.min(3, adj[start].length); k > 0; k--) walkers.push({ at: start, from: -1, d: 0 });
+    while (walkers.length && segs.length < 2500) {
+      let wi = 0; // the walker that has run the least goes next, so the threads grow evenly
+      for (let k = 1; k < walkers.length; k++) if (walkers[k].d < walkers[wi].d) wi = k;
+      const w = walkers[wi], [x, y] = nodes[w.at];
+      let total = 0;
+      opts.length = 0;
+      for (const nb of adj[w.at]) {
+        if (used.has(w.at < nb ? w.at * N + nb : nb * N + w.at)) continue;
+        const dx = nodes[nb][0] - x, dy = nodes[nb][1] - y, len = Math.hypot(dx, dy) || 1e-6;
+        let wt = 1;
+        if (w.from >= 0) {
+          const px = x - nodes[w.from][0], py = y - nodes[w.from][1];
+          wt = 0.03 + ((1 + (px * dx + py * dy) / (len * (Math.hypot(px, py) || 1e-6))) / 2) ** 3;
+        }
+        opts.push(nb, wt, len); total += wt;
+      }
+      if (!opts.length || w.d > 6) { walkers.splice(wi, 1); continue; }
+      let k = 0;
+      for (let r = Math.random() * total; k < opts.length - 3 && (r -= opts[k + 1]) > 0;) k += 3;
+      const nb = opts[k], len = opts[k + 2];
+      used.add(w.at < nb ? w.at * N + nb : nb * N + w.at);
+      segs.push([w.at, nb, w.d, len]);
+      if (opts.length > 3 && walkers.length < 14 && Math.random() < Math.min(0.5, len * 3))
+        walkers.push({ at: w.at, from: w.from, d: w.d });
+      w.from = w.at; w.at = nb; w.d += len;
+    }
+    return segs;
+  }
+
+  // A repeatable random number from 0 to 1 for a pair of numbers
+  const noise = (a, b) => { const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); };
+
+  function drawWires(dt, now, shape, cx, cy, tf, keyTop) {
+    const ww = W / WHITES, rate = 4 * S.speed * H; // the wire's head, in pixels per second
+    ctx.lineCap = ctx.lineJoin = 'round';
+    for (let i = wires.length - 1; i >= 0; i--) {
+      const w = wires[i], b = w.bar;
+      if (w.shape !== shape) aim(w, shape); // new wire, or the figure changed under it
+      const nodes = w.graph.nodes, P = nodes[w.node], [rot, s] = tf[w.layer];
+      const cos = Math.cos(rot) * s, sin = Math.sin(rot) * s;
+      const tx = cx + P[0] * cos - P[1] * sin, ty = cy + P[0] * sin + P[1] * cos; // where it lands, turning with the figure
+      const g = keyGeo[b.note], kx = (g.x + g.w / 2) * ww;
+      // p is how far the head has got, q the tail, which leaves the key when the note is released
+      const step = dt * rate / Math.max(60, Math.hypot(tx - kx, ty - keyTop));
+      w.p = Math.min(1, w.p + step);
+      if (b.end != null) w.q = Math.min(w.p, w.q + step);
+      if (w.p >= 1 && !w.segs) { w.segs = spread(w.graph, w.node); w.hitAt ??= now; w.grown ||= 0.08; }
+      let fade = 1;
+      // Once landed, the colour runs for the Spread time whether or not the key is still down.
+      // With Held notes set to Keep spreading it also runs for as long as the wire feeds it.
+      // It fades after that, and after the whole wire has gone in.
+      const growing = w.p >= 1 && (now - w.hitAt < S.gspread * 1000 || (S.ghold && w.q < 1));
+      if (growing) w.grown += dt * 0.9 * S.gdraw * (0.5 + b.vel);
+      else if (w.q >= 1) {
+        w.doneAt ??= now;
+        fade = 1 - (now - w.doneAt) / ((1500 + Math.min(4500, (b.end - b.start) * 2)) * S.gfade);
+        if (fade <= 0) { wires.splice(i, 1); continue; }
+      }
+
+      const hue = hueOf(b.note, b.vel), ve = feel(b.vel), glow = 0.4 + S.glow;
+      const light = 56 + 14 * ve, alpha = fade * Math.min(1, 0.45 + 0.55 * ve);
+      if (w.segs) {
+        ctx.save();
+        ctx.translate(cx, cy); ctx.rotate(rot); ctx.scale(s, s);
+        ctx.beginPath();
+        // Effects are at full strength while the threads grow, and linger faintly once they stop.
+        //   Shimmer   bright pulses that travel along the threads
+        //   Electric  jagged arcs that jump along pieces of thread, redrawn many times a second
+        //   Sparks    particles thrown off the growing tips, and a few shed along the threads
+        const fx = fade * (growing ? 1 : 0.35), tick = now / 55 | 0;
+        const hi = S.gshimmer > 0 ? new Path2D() : null, zap = S.gelectric > 0 ? new Path2D() : null;
+        const tips = growing && S.gsparks > 0, shed = S.gsparks > 0 ? Math.floor(S.gsparks * 60 * fx * dt + Math.random()) : 0;
+        const at = (x, y) => [cx + x * cos - y * sin, cy + x * sin + y * cos]; // figure to screen
+        let k = 0;
+        for (const sg of w.segs) {
+          if (sg[2] >= w.grown) break;
+          const A = nodes[sg[0]], B = nodes[sg[1]], t = Math.min(1, (w.grown - sg[2]) / sg[3]);
+          const ex = A[0] + (B[0] - A[0]) * t, ey = A[1] + (B[1] - A[1]) * t;
+          ctx.moveTo(A[0], A[1]); ctx.lineTo(ex, ey);
+          k++;
+          const pulse = hi && Math.sin(sg[2] * 14 - now * 0.006 + b.note) > 0.6;
+          const arc = zap && noise(k, tick) < 0.04 + 0.2 * S.gelectric;
+          if (!pulse && !arc && !(tips && t < 1)) continue;
+          const [x0, y0] = at(A[0], A[1]), [x1, y1] = at(ex, ey);
+          if (pulse) { hi.moveTo(x0, y0); hi.lineTo(x1, y1); }
+          if (arc) {
+            const len = Math.hypot(x1 - x0, y1 - y0) || 1;
+            const kick = Math.min(len * 0.6, 2 + 7 * S.gelectric) * (noise(k + 0.5, tick) * 2 - 1) / len;
+            zap.moveTo(x0, y0); zap.lineTo((x0 + x1) / 2 - (y1 - y0) * kick, (y0 + y1) / 2 + (x1 - x0) * kick); zap.lineTo(x1, y1);
+          }
+          if (tips && t < 1) for (let n = Math.floor(S.gsparks * 200 * dt + Math.random()); n > 0; n--)
+            spawn(x1, y1, (Math.random() - 0.5) * 170, (Math.random() - 0.5) * 170, 0.3 + Math.random() * 0.7, 0.7 + Math.random() * 1.6, hue + (Math.random() - 0.5) * 30);
+        }
+        for (let n = shed; n > 0 && k; n--) {
+          const sg = w.segs[Math.random() * k | 0], A = nodes[sg[0]], B = nodes[sg[1]], t = Math.random() * Math.min(1, (w.grown - sg[2]) / sg[3]);
+          const [x, y] = at(A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t);
+          spawn(x, y, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, 0.4 + Math.random() * 0.7, 0.5 + Math.random() * 0.9, hue + (Math.random() - 0.5) * 30);
+        }
+        ctx.restore(); // the path keeps its transform; stroke width stays in screen pixels
+        const hit = Math.exp(-(now - w.hitAt) / 250);
+        ctx.strokeStyle = `hsla(${hue}, 95%, 60%, ${alpha * 0.16})`;
+        ctx.lineWidth = (5 + 4 * b.vel) * S.gline * glow; ctx.stroke();
+        ctx.strokeStyle = `hsla(${hue}, 95%, ${light + 8}%, ${alpha})`;
+        ctx.lineWidth = (0.9 + b.vel) * S.gline; ctx.stroke();
+        if (hi) {
+          ctx.strokeStyle = `hsla(${hue}, 100%, 90%, ${fx * S.gshimmer * 0.8})`;
+          ctx.lineWidth = (1.3 + b.vel) * S.gline * 1.5; ctx.stroke(hi);
+        }
+        if (zap) {
+          ctx.strokeStyle = `hsla(${hue}, 70%, 92%, ${fx * (0.4 + 0.4 * S.gelectric)})`;
+          ctx.lineWidth = Math.max(1, 0.8 * S.gline); ctx.stroke(zap);
+        }
+        if (hit > 0.02) {
+          ctx.fillStyle = `hsla(${hue}, 100%, 80%, ${hit * 0.8})`;
+          ctx.beginPath(); ctx.arc(tx, ty, (3 + 10 * b.vel) * hit * glow + 1, 0, TAU); ctx.fill();
+        }
+      }
+      if (w.q < 1) {
+        // The wire leaves the key straight up, then bends over to its point on the rim
+        const my = keyTop - (keyTop - ty) * 0.6, n = 24;
+        ctx.beginPath();
+        for (let k = 0; k <= n; k++) {
+          const t = w.q + (w.p - w.q) * k / n, u = 1 - t;
+          ctx.lineTo(u * u * kx + 2 * u * t * kx + t * t * tx, u * u * keyTop + 2 * u * t * my + t * t * ty);
+        }
+        const core = (0.6 + 2.6 * S.width) * girth(b.vel);
+        const shimmer = w.p >= 1 && b.end == null ? 0.85 + 0.15 * Math.sin(now * 0.006 + b.note * 2.1) : 1;
+        ctx.strokeStyle = `hsla(${hue}, 95%, 60%, ${0.07 * shimmer})`;
+        ctx.lineWidth = core + 30 * S.glow; ctx.stroke();
+        ctx.strokeStyle = `hsla(${hue}, 95%, 60%, ${0.2 * shimmer})`;
+        ctx.lineWidth = core + 9 * S.glow; ctx.stroke();
+        ctx.strokeStyle = `hsla(${hue}, 95%, ${light + 12}%, ${Math.min(1, 0.5 + 0.5 * ve) * shimmer})`;
+        ctx.lineWidth = core; ctx.stroke();
+      }
+    }
+  }
+
   let geoT = 0;
   function drawGeometry(dt, now, keyTop) {
     updateLive(dt);
     const react = S.greact;
     geoT += dt * S.gspin * (1 + react * live.energy);
-    if (S.gopacity <= 0 || keyTop < 40) return;
+    const wire = S.nmode === 2;
+    if (!wire) wires.length = 0;
+    if ((S.gopacity <= 0 && !wire) || keyTop < 40) return;
     const shape = currentShape();
     const R = Math.min(W * 0.48, keyTop * 0.54) * S.gsize, cx = W / 2, cy = keyTop / 2;
-    const sym = shape.sym || 6, reveal = S.greveal === 1, lw = S.gline;
+    const sym = shape.sym || 6, reveal = !wire && S.greveal === 1, lw = S.gline;
     shape.update?.(geoT);
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
@@ -990,7 +1236,8 @@
       tf.push([rot, s]);
       if (reveal) continue;
       // Layers step through the same hue range as the keyboard, bass outside to treble inside
-      const hue = S.hue + S.spread * pos + react * live.hue, sat = S.gsat * 100;
+      // In Wireframe mode the figure is grey; the only colour in it is what the notes bring
+      const hue = S.hue + S.spread * pos + react * live.hue, sat = wire ? 0 : S.gsat * 100;
       const alpha = S.gopacity * shape.dim * (1 + 1.2 * lv);
       // The shape's path is built once in unit space. Line widths are divided by the scale
       // so they stay in screen pixels.
@@ -1003,9 +1250,12 @@
       ctx.lineWidth = lw / s; ctx.stroke(path);
       ctx.restore();
     }
-    if (reveal) drawLit(now, shape, cx, cy, tf);
-    if (shape.fifths) drawChord(now, cx, cy, tf[0][0], tf[0][1]);
-    if (react > 0) drawThreads(now, cx, cy, R, sym);
+    if (wire) drawWires(dt, now, shape, cx, cy, tf, keyTop);
+    else {
+      if (reveal) drawLit(now, shape, cx, cy, tf);
+      if (shape.fifths) drawChord(now, cx, cy, tf[0][0], tf[0][1]);
+      if (react > 0) drawThreads(now, cx, cy, R, sym);
+    }
     ctx.restore();
   }
 
@@ -1198,6 +1448,8 @@
     if (!fastGlow) bctx.shadowBlur = S.glow * 34 * DPR;
     for (let i = bars.length - 1; i >= 0; i--) {
       const b = bars[i], g = keyGeo[b.note];
+      // Bars are only drawn in the Note visualizer. Elsewhere a bar lasts as long as its key is down.
+      if (S.nmode !== 1) { if (b.end != null) bars.splice(i, 1); continue; }
       const yTop = keyTop - (now - b.start) / 1000 * pps;
       const yBot = b.end == null ? keyTop : keyTop - (now - b.end) / 1000 * pps;
       if (yBot < -40) { if (b.smear) b.smear.end ??= now; bars.splice(i, 1); continue; }
@@ -1269,22 +1521,24 @@
     for (let n = LOW; n <= HIGH; n++) {
       const on = held.has(n);
       if (!on && flash[n] < 0.01) continue;
-      const g = keyGeo[n], cx = (g.x + g.w / 2) * ww;
-      const power = (on ? 0.55 : 0) + flash[n] * 0.6;
-      const rad = ww * (2.2 + flash[n] * 2.5) * (0.4 + S.glow);
-      // One gradient per hue, one unit across; the transform places and sizes it
-      const hue = Math.round(hueOf(n));
-      ctx.fillStyle = gradient('note:' + hue, () => {
-        const rg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-        rg.addColorStop(0, `hsla(${hue}, 100%, 78%, 1)`);
-        rg.addColorStop(0.3, `hsla(${hue}, 100%, 60%, 0.35)`);
-        rg.addColorStop(1, 'hsla(0,0%,0%,0)');
-        return rg;
-      });
-      ctx.globalAlpha = Math.min(1, power);
-      ctx.setTransform(DPR * rad, 0, 0, DPR * rad, DPR * cx, DPR * keyTop);
-      ctx.fillRect(-1, -1, 2, 1);
-      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      if (S.nmode > 0) { // Off lights the key itself and nothing above it
+        const g = keyGeo[n], cx = (g.x + g.w / 2) * ww;
+        const power = (on ? 0.55 : 0) + flash[n] * 0.6;
+        const rad = ww * (2.2 + flash[n] * 2.5) * (0.4 + S.glow);
+        // One gradient per hue, one unit across; the transform places and sizes it
+        const hue = Math.round(hueOf(n));
+        ctx.fillStyle = gradient('note:' + hue, () => {
+          const rg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+          rg.addColorStop(0, `hsla(${hue}, 100%, 78%, 1)`);
+          rg.addColorStop(0.3, `hsla(${hue}, 100%, 60%, 0.35)`);
+          rg.addColorStop(1, 'hsla(0,0%,0%,0)');
+          return rg;
+        });
+        ctx.globalAlpha = Math.min(1, power);
+        ctx.setTransform(DPR * rad, 0, 0, DPR * rad, DPR * cx, DPR * keyTop);
+        ctx.fillRect(-1, -1, 2, 1);
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      }
       flash[n] *= Math.pow(0.004, dt);
       if (on) burst(n, held.get(n).vel * 0.6, Math.floor(amount() * 5 * dt + Math.random()));
     }
@@ -1320,6 +1574,21 @@
         ctx.fillStyle = kg;
         ctx.fill();
       };
+      // Played keys take their note's colour. With notes Off they also glow, and fade out on release.
+      const off = S.nmode === 0;
+      const lightKeys = black => {
+        for (let n = LOW; n <= HIGH; n++) {
+          const g = keyGeo[n], a = held.has(n) ? 1 : off ? flash[n] : 0;
+          if (g.black !== black || a < 0.02) continue;
+          ctx.globalAlpha = a;
+          if (off) { ctx.shadowColor = colorOf(n, 60); ctx.shadowBlur = 45 * S.glow * DPR; }
+          ctx.beginPath();
+          if (black) { blackKey(g.x * ww, g.w * ww); heldFill(n, keyTop + bh, 50, 68); }
+          else { whiteKey(g.x * ww); heldFill(n, H, 60, 82); }
+        }
+        ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      };
+      if (off) { ctx.save(); ctx.beginPath(); ctx.rect(0, keyTop, W, kh); ctx.clip(); } // the glow stays on the keys
       ctx.beginPath();
       for (let n = LOW; n <= HIGH; n++) if (!keyGeo[n].black && !held.has(n)) whiteKey(keyGeo[n].x * ww);
       ctx.fillStyle = gradient(`white:${keyTop}:${H}`, () => {
@@ -1328,10 +1597,7 @@
         return kg;
       });
       ctx.fill();
-      for (const n of held.keys()) {
-        if (keyGeo[n].black) continue;
-        ctx.beginPath(); whiteKey(keyGeo[n].x * ww); heldFill(n, H, 60, 82);
-      }
+      lightKeys(false);
       ctx.beginPath();
       for (let n = LOW; n <= HIGH; n++) if (keyGeo[n].black && !held.has(n)) blackKey(keyGeo[n].x * ww, keyGeo[n].w * ww);
       ctx.fillStyle = gradient(`black:${keyTop}:${bh}`, () => {
@@ -1340,10 +1606,8 @@
         return kg;
       });
       ctx.fill();
-      for (const n of held.keys()) {
-        if (!keyGeo[n].black) continue;
-        ctx.beginPath(); blackKey(keyGeo[n].x * ww, keyGeo[n].w * ww); heldFill(n, keyTop + bh, 50, 68);
-      }
+      lightKeys(true);
+      if (off) ctx.restore();
       // Felt strip
       ctx.fillStyle = gradient(`strip:${S.hue}:${S.spread}:${W}`, () => {
         const strip = ctx.createLinearGradient(0, 0, W, 0);
