@@ -114,14 +114,19 @@
   // ---------- Settings ----------
   const GROUPS = [
     { title: 'Keyboard', controls: [
-      // What a played note sends up the screen: nothing (the keys alone light up), a bar, or a
-      // wire that runs to the backdrop and colours it. Each mode shows only the sliders it uses.
-      { key: 'nmode',     label: 'Notes',           min: 0,    max: 2,   step: 1,    def: 1, choice: true,
-        names: ['Off', 'Note visualizer', 'Wireframe'] },
-      { key: 'speed',     label: 'Speed',           min: 0.05, max: 1.5, step: 0.01, def: 0.35, when: () => S.nmode > 0 },
-      { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8,  when: () => S.nmode > 0 },
+      // What a played note sends up the screen: nothing (the keys alone light up), a bar, a
+      // wire that runs to the backdrop and colours it, or nothing from the key but a cloud of
+      // colour lit up somewhere behind. Each mode shows only the sliders it uses.
+      { key: 'nmode',     label: 'Notes',           min: 0,    max: 3,   step: 1,    def: 1, choice: true,
+        names: ['Off', 'Note visualizer', 'Wireframe', 'Thunder'] },
+      { key: 'speed',     label: 'Speed',           min: 0.05, max: 1.5, step: 0.01, def: 0.35, when: () => S.nmode === 1 || S.nmode === 2 },
+      { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8,  when: () => S.nmode === 1 || S.nmode === 2 },
       { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5,  when: () => S.nmode === 1 },
       { key: 'wiggle',    label: 'Wiggle',          min: 0,    max: 1,   step: 0.01, def: 0,    when: () => S.nmode === 1 },
+      { key: 'topacity',  label: 'Cloud opacity',   min: 0,    max: 1,   step: 0.01, def: 0.7,  when: () => S.nmode === 3 },
+      { key: 'tbright',   label: 'Cloud brightness', min: 0,   max: 1,   step: 0.01, def: 0.6,  when: () => S.nmode === 3 },
+      { key: 'tsize',     label: 'Cloud size',      min: 0.3,  max: 2,   step: 0.01, def: 1,    when: () => S.nmode === 3 },
+      { key: 'tfade',     label: 'Cloud fade',      min: 0.5,  max: 10,  step: 0.1,  def: 3,    when: () => S.nmode === 3 },
       { key: 'glow',      label: 'Glow',            min: 0,    max: 1,   step: 0.01, def: 0.6 },
       { key: 'vsens',     label: 'Velocity sensitivity', min: 0, max: 1, step: 0.01, def: 0.5,  when: () => S.nmode > 0 },
       { key: 'hue',       label: 'Hue',             min: 0,    max: 360, step: 1,    def: 215 },
@@ -462,6 +467,7 @@
       wires.push({ bar, p: 0, q: 0, grown: 0 });
       if (wires.length > MAX_WIRES) wires.shift();
     }
+    if (S.nmode === 3) strike(bar);
     burst(n, vel, Math.round(amount() * 0.5 * (0.4 + vel)));
   }
   function noteOff(n) {
@@ -1211,6 +1217,63 @@
     }
   }
 
+  // ---------- Thunder ----------
+  // A note sends nothing up from its key. A cloud of its colour lights up at a random place
+  // behind everything, as if by lightning inside it: it flashes and flickers, glows on while
+  // the key is down, then fades. The harder the strike, the bigger the cloud. A cloud is a few
+  // soft puffs that light a moment apart. They hold no detail, so they are painted small and
+  // scaled up, and they add to each other where they overlap.
+  const clouds = [], MAX_CLOUDS = 60, CLOUD_K = 4; // { bar, x, y, r, puffs }
+  const cloudCanvas = document.createElement('canvas');
+  const cctx = cloudCanvas.getContext('2d');
+  function strike(bar) {
+    const hue = hueOf(bar.note, bar.vel), v = Math.min(1, feel(bar.vel));
+    clouds.push({ bar, x: rnd(0.04, 0.96), y: rnd(0.08, 0.88), r: 0.1 + 0.45 * v * v,
+      puffs: Array.from({ length: 6 }, (_, i) => ({
+        dx: i ? rnd(-0.75, 0.75) : 0, dy: i ? rnd(-0.4, 0.4) : 0, r: i ? rnd(0.45, 0.85) : 1,
+        hue: Math.round((hue + rnd(-14, 14)) / 4) * 4, wait: i ? rnd(0, 160) : 0, seed: rnd(0, 100),
+      })) });
+    if (clouds.length > MAX_CLOUDS) clouds.shift();
+  }
+  function drawClouds(now, keyTop) {
+    if (S.nmode !== 3) { clouds.length = 0; return; }
+    if (!clouds.length || keyTop < 1) return;
+    const cw = Math.ceil(W / CLOUD_K), ch = Math.ceil(keyTop / CLOUD_K);
+    if (cloudCanvas.width !== cw || cloudCanvas.height !== ch) { cloudCanvas.width = cw; cloudCanvas.height = ch; }
+    else { cctx.setTransform(1, 0, 0, 1, 0, 0); cctx.clearRect(0, 0, cw, ch); }
+    cctx.globalCompositeOperation = 'lighter';
+    const unit = Math.min(W, keyTop) * S.tsize / CLOUD_K, tick = now / 50 | 0, bright = S.tbright;
+    for (let i = clouds.length - 1; i >= 0; i--) {
+      const c = clouds[i], b = c.bar;
+      const fade = b.end == null ? 1 : 1 - (now - b.end) / (S.tfade * 1000);
+      if (fade <= 0) { clouds.splice(i, 1); continue; }
+      const R = c.r * unit;
+      for (const p of c.puffs) {
+        const t = now - b.start - p.wait;
+        if (t < 0) continue;
+        // The flash dies away in a fraction of a second, flickering at first
+        const flash = Math.exp(-t / 260) * (1 - 0.5 * noise(tick, p.seed) * Math.exp(-t / 150));
+        const r = R * p.r * (1 + 0.12 * flash);
+        cctx.globalAlpha = fade * fade * (0.35 * Math.min(1, t / 150) + 0.65 * flash);
+        // One gradient per hue and brightness, one unit across; the transform places and sizes it
+        cctx.fillStyle = gradient(`cloud:${p.hue}:${bright}`, () => {
+          const g = cctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+          g.addColorStop(0, `hsla(${p.hue}, 100%, ${30 + 60 * bright}%, 1)`);
+          g.addColorStop(0.35, `hsla(${p.hue}, 95%, ${25 + 35 * bright}%, 0.45)`);
+          g.addColorStop(1, `hsla(${p.hue}, 95%, ${25 + 35 * bright}%, 0)`);
+          return g;
+        });
+        cctx.setTransform(r, 0, 0, r, c.x * cw + p.dx * R, c.y * ch + p.dy * R);
+        cctx.fillRect(-1, -1, 2, 2);
+      }
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = S.topacity;
+    ctx.drawImage(cloudCanvas, 0, 0, cw * CLOUD_K, ch * CLOUD_K);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
   let geoT = 0;
   function drawGeometry(dt, now, keyTop) {
     updateLive(dt);
@@ -1435,6 +1498,7 @@
     ctx.fillStyle = 'rgba(255,255,255,0.035)';
     for (let n = LOW; n <= HIGH; n++) if (n % 12 === 0) ctx.fillRect(keyGeo[n].x * ww, 0, 1, keyTop);
 
+    drawClouds(now, keyTop);
     drawGeometry(dt, now, keyTop);
     drawWeather(dt, now, keyTop);
 
