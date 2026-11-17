@@ -159,11 +159,12 @@
       { key: 'gopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.35 },
       { key: 'gsat',      label: 'Saturation',      min: 0,    max: 1,   step: 0.01, def: 0.8, when: () => S.nmode !== 2 },
     ] },
-    // In Wireframe mode the figure is always there in grey, and Draw speed and Fade time set
+    // In Wireframe mode the figure is there in grey (unless Geometry appears is When played,
+    // which leaves only the colour the notes bring), and Draw speed and Fade time set
     // how fast colour runs along its wires and how long it stays. Spread time is how long the
     // colour keeps running after a wire lands, however short the note was.
     { title: 'Reaction', controls: [
-      { key: 'greveal',   label: 'Geometry appears', min: 0,   max: 1,   step: 1,    def: 0, names: ['Always', 'When played'], when: () => S.nmode !== 2 },
+      { key: 'greveal',   label: 'Geometry appears', min: 0,   max: 1,   step: 1,    def: 0, names: ['Always', 'When played'] },
       { key: 'gdraw',     label: 'Draw speed',      min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 || S.nmode === 2 },
       { key: 'gfade',     label: 'Fade time',       min: 0.2,  max: 4,   step: 0.05, def: 1, when: () => S.greveal === 1 || S.nmode === 2 },
       { key: 'gspread',   label: 'Spread time',     min: 0.2,  max: 8,   step: 0.1,  def: 2.5, when: () => S.nmode === 2 },
@@ -1299,7 +1300,7 @@
     if ((S.gopacity <= 0 && !wire) || keyTop < 40) return;
     const shape = currentShape();
     const R = Math.min(W * 0.48, keyTop * 0.54) * S.gsize, cx = W / 2, cy = keyTop / 2;
-    const sym = shape.sym || 6, reveal = !wire && S.greveal === 1, lw = S.gline;
+    const sym = shape.sym || 6, reveal = S.greveal === 1, lw = S.gline;
     shape.update?.(geoT);
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, W, keyTop); ctx.clip();
