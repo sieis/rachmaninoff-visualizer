@@ -39,6 +39,11 @@
     max-height: calc(100vh - 74px); overflow-y: auto;
   }
   #panel[hidden] { display: none; }
+  /* While Hue or Color spread is in hand, everything but those two sliders clears out of the way */
+  #panel, #panel details > * { transition: opacity .2s, background-color .2s, border-color .2s, box-shadow .2s; }
+  #panel.peek { background-color: transparent; border-color: transparent; }
+  #panel.peek details > :not(.live) { opacity: 0; }
+  #panel.peek .live { background-color: rgba(18, 20, 30, .85); box-shadow: 0 0 0 8px rgba(18, 20, 30, .85); border-radius: 4px; }
   /* A column per group of sections; they wrap when the window is narrow. A column whose sections
      are all closed is only as wide as its headings, so the panel shrinks around what is open. */
   #rows { display: flex; flex-wrap: wrap; gap: 0 22px; align-items: flex-start; }
@@ -191,6 +196,7 @@
   const rows = document.getElementById('rows');
   const inputs = {}, sections = { Presets: document.getElementById('presets') };
   const changed = () => { save(); dropHash(); syncRows(); };
+  let peekUntil = 0, peek = 0; // when the tall colour band should stand until, and how far up it is (0..1)
   for (const g of GROUPS) {
     const section = sections[g.title] = document.createElement('details');
     section.open = true;
@@ -219,6 +225,15 @@
         // the range input clamps and snaps to its step
         set = v => { input.value = v; S[c.key] = +input.value; show(); };
         input.addEventListener('input', () => { S[c.key] = +input.value; show(); changed(); });
+        if (c.key === 'hue' || c.key === 'spread') {
+          // The colour band above the keys stands tall while either slider is in hand
+          row.classList.add('live');
+          const hold = () => { peekUntil = Infinity; };
+          const letGo = () => { peekUntil = performance.now() + 900; };
+          input.addEventListener('pointerdown', hold);
+          input.addEventListener('input', () => { if (peekUntil !== Infinity) letGo(); });
+          for (const type of ['pointerup', 'pointercancel', 'change', 'blur']) input.addEventListener(type, letGo);
+        }
       }
       set(S[c.key]);
       inputs[c.key] = { set, row };
@@ -1683,6 +1698,20 @@
       ctx.shadowBlur = 12 * S.glow * DPR;
       ctx.fillRect(0, keyTop - 2, W, 2);
       ctx.shadowBlur = 0;
+    }
+
+    // While Hue or Color spread is being dragged, the strip grows into a tall band: one slice per
+    // key in the colour that key plays (or soft to loud, left to right, when colouring by velocity)
+    peek += ((now < peekUntil ? 1 : 0) - peek) * (1 - Math.exp(-dt * 12));
+    panel.classList.toggle('peek', now < peekUntil);
+    if (peek > 0.01) {
+      const band = peek * Math.max(48, H * 0.08), count = HIGH - LOW + 1;
+      ctx.globalAlpha = Math.min(1, peek * 1.5);
+      for (let i = 0; i < count; i++) {
+        ctx.fillStyle = `hsl(${hueOf(LOW + i, i / (count - 1))}, 90%, 55%)`;
+        ctx.fillRect(Math.floor(i * W / count), keyTop - band, Math.ceil(W / count) + 1, band);
+      }
+      ctx.globalAlpha = 1;
     }
 
     requestAnimationFrame(frame);
