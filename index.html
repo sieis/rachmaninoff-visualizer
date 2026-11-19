@@ -249,8 +249,12 @@
       { key: 'nshow',     label: 'Notes show',      min: 0,    max: 1,   step: 1,    def: 1, names: ['Chord', 'Bars'], local: true },
       { key: 'nnames',    label: 'Note names',      min: 0,    max: 1,   step: 1,    def: 1, names: ['Hide', 'Show'], local: true },
       { key: 'nbars',     label: 'Bars',            min: 1,    max: 8,   step: 1,    def: 4,  local: true, when: () => S.nshow === 1 },
-      { key: 'nbeats',    label: 'Beats per bar',   min: 2,    max: 7,   step: 1,    def: 4,  local: true, when: () => S.nshow === 1 },
-      { key: 'ntempo',    label: 'Tempo (BPM)',     min: 40,   max: 200, step: 1,    def: 90, local: true, when: () => S.nshow === 1 },
+    ] },
+    // A metronome. The notes window's bars take their tempo and meter from here.
+    { title: 'Click', controls: [
+      { key: 'ctempo',    label: 'Tempo (BPM)',     min: 40,   max: 220, step: 1,    def: 90, local: true },
+      { key: 'cbeats',    label: 'Beats per bar',   min: 2,    max: 7,   step: 1,    def: 4,  local: true },
+      { key: 'cvol',      label: 'Volume',          min: 0,    max: 1,   step: 0.01, def: 0.6, local: true },
     ] },
     { title: 'Image', controls: [
       { key: 'iopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.5 },
@@ -267,7 +271,7 @@
 
   const rows = document.getElementById('rows');
   const inputs = {}, sections = { Presets: document.getElementById('presets') };
-  const changed = () => { save(); dropHash(); syncRows(); notesSettingsChanged(); };
+  const changed = () => { save(); dropHash(); syncRows(); clickSettingsChanged(); notesSettingsChanged(); };
   let peekUntil = 0, peek = 0; // when the tall colour band should stand until, and how far up it is (0..1)
   for (const g of GROUPS) {
     const section = sections[g.title] = document.createElement('details');
@@ -313,7 +317,7 @@
     }
   }
   // Short sections share a column
-  for (const titles of [['Keyboard'], ['Microphone', 'Particles', 'Weather', 'Windows'], ['Geometry'], ['Reaction', 'Image', 'Presets']]) {
+  for (const titles of [['Keyboard'], ['Microphone', 'Particles', 'Weather', 'Windows'], ['Geometry', 'Click'], ['Reaction', 'Image', 'Presets']]) {
     const col = document.createElement('div');
     rows.appendChild(col);
     col.append(...titles.map(t => sections[t]));
@@ -1982,6 +1986,7 @@
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'n' || e.key === 'N') toggleNotes();
+    if (e.key === 'm' || e.key === 'M') toggleClick();
     if (e.key === 'f' || e.key === 'F') toggleFs();
     if (e.key === 'h' || e.key === 'H') togglePanel();
     if (e.key === 'r' || e.key === 'R') randomize();
@@ -2000,6 +2005,58 @@
   addEventListener('pointermove', wake);
   addEventListener('pointerdown', wake);
   wake();
+
+  // ---------- Click track ----------
+  // A metronome, its first beat in each bar pitched higher. While it runs, the notes window's
+  // bars follow it: bar 1 starts on its first click, and the page turns with it.
+  const click = { ac: null, on: false, next: 0, beat: 0, timer: 0, t0: 0, key: '' };
+  const clickKey = () => S.ctempo + ':' + S.cbeats;
+  function tick(time, accent) {
+    const ac = click.ac, o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.value = accent ? 1760 : 1175;
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(S.cvol * (accent ? 0.9 : 0.5) + 0.0001, time + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
+    o.connect(g).connect(ac.destination);
+    o.start(time); o.stop(time + 0.07);
+  }
+  // Clicks are booked a little ahead on the audio clock, so they keep time when the page is busy
+  function bookClicks() {
+    while (click.next < click.ac.currentTime + 0.12) {
+      tick(click.next, click.beat % S.cbeats === 0);
+      click.beat++;
+      click.next += 60 / S.ctempo;
+    }
+  }
+  async function startClick() {
+    click.ac ||= new AudioContext();
+    await click.ac.resume().catch(() => {});
+    const ac = click.ac, lead = 0.1;
+    click.next = ac.currentTime + lead; click.beat = 0;
+    // When the first click is heard, on the page's clock, counting the trip to the speakers
+    click.t0 = performance.now() + (lead + (ac.outputLatency || ac.baseLatency || 0)) * 1000;
+    click.on = true; click.key = clickKey();
+    clearInterval(click.timer);
+    click.timer = setInterval(bookClicks, 25);
+    bookClicks();
+    clickBtn.textContent = 'Stop click';
+    notesSettingsChanged();
+  }
+  function stopClick() {
+    click.on = false;
+    clearInterval(click.timer);
+    clickBtn.textContent = 'Start click';
+    notesSettingsChanged();
+  }
+  const toggleClick = () => click.on ? stopClick() : startClick();
+  // A new tempo or meter counts in again from bar 1
+  function clickSettingsChanged() { if (click.on && click.key !== clickKey()) startClick(); }
+  const clickPair = document.createElement('div');
+  clickPair.className = 'pair';
+  clickPair.innerHTML = '<button title="Click track (M)">Start click</button>';
+  const clickBtn = clickPair.firstChild;
+  sections.Click.insertBefore(clickPair, sections.Click.children[1]);
+  clickBtn.onclick = toggleClick;
 
   // ---------- Notes window ----------
   // Shows what is played (MIDI, pointer and microphone together) on a grand staff: either the
@@ -2140,17 +2197,20 @@
   const spelledName = (n, sp) => pcName(sp) + (Math.floor((n - sp[1]) / 12) - 1);
 
   // ---- Bars: notes written left to right in time ----
-  // The first note starts a clock at the Tempo setting, and each note lands on the nearest
-  // eighth of a beat. A note past the last bar clears the page and starts it again at the left.
-  // After a whole page of silence the next note starts over at bar 1.
+  // Time runs at the click track's tempo and meter, and each note lands on the nearest eighth
+  // of a beat. A note past the last bar clears the page and starts it again at the left.
+  // With the click running, bar 1 starts on its first click and the page turns with it, played
+  // or not. Without it, the first note starts the clock, and after a whole page of silence the
+  // next note starts over at bar 1.
   const BEAT_W = 40;
   const tr = { t0: null, page: 0, last: 0, events: [] }; // events: { beat, notes: Map(n -> { off }) }
-  const beatMs = () => 60000 / S.ntempo, pageBeats = () => S.nbars * S.nbeats;
+  const beatMs = () => 60000 / S.ctempo, pageBeats = () => S.nbars * S.cbeats;
   const barsWidth = () => CLEF + pageBeats() * BEAT_W + 8;
   function recordOn(n, now) {
     if (!notesShown() || S.nshow !== 1) return;
-    if (tr.t0 == null || now - tr.last > pageBeats() * beatMs()) Object.assign(tr, { t0: now, page: 0, events: [] });
-    const q = Math.round((now - tr.t0) / beatMs() * 2) / 2;
+    if (click.on) tr.t0 = click.t0;
+    else if (tr.t0 == null || now - tr.last > pageBeats() * beatMs()) Object.assign(tr, { t0: now, page: 0, events: [] });
+    const q = Math.max(0, Math.round((now - tr.t0) / beatMs() * 2) / 2);
     const page = Math.floor(q / pageBeats()), beat = q - page * pageBeats();
     if (page !== tr.page) { tr.page = page; tr.events = []; }
     let ev = tr.events.find(e => e.beat === beat);
@@ -2171,7 +2231,7 @@
   const beatX = b => CLEF + 8 + b * BEAT_W;
   function drawBars(now) {
     const w = barsWidth(), bars = [];
-    for (let i = 1; i < S.nbars; i++) bars.push(CLEF + i * S.nbeats * BEAT_W);
+    for (let i = 1; i < S.nbars; i++) bars.push(CLEF + i * S.cbeats * BEAT_W);
     let out = staffLines(w, bars);
     const pageEnd = beatX(pageBeats()) - 8;
     for (const ev of tr.events) {
@@ -2186,7 +2246,7 @@
       if (S.nnames && ns.length > 2 && name) out += `<text x="${x}" y="12" font-size="10" text-anchor="middle" fill="#dfe3ee">${name}</text>`;
     }
     const b = pageBeat(now);
-    if (b != null && now - tr.last < pageBeats() * beatMs())
+    if (b != null && (click.on || now - tr.last < pageBeats() * beatMs()))
       out += svgLine(beatX(b), TT - 14, beatX(b), BT + 54, 1, 'rgba(142, 162, 255, .5)');
     return svgBox(w, out);
   }
@@ -2234,6 +2294,12 @@
   // Bars move with time: redraw while the playhead runs or a held note's line grows
   function notesTick(now) {
     if (!notesShown() || S.nshow !== 1 || now - lastDraw < 40) return;
+    if (click.on) {
+      // The page turns with the click
+      const page = Math.floor(Math.max(0, now - click.t0) / beatMs() / pageBeats());
+      if (page !== tr.page) { tr.page = page; tr.events = []; }
+      return renderNotes();
+    }
     if (held.size || (tr.t0 != null && now - tr.last < pageBeats() * beatMs() + 200)) renderNotes();
   }
   // Called whenever a control moves
@@ -2242,8 +2308,11 @@
     document.documentElement.style.setProperty('--notes-a', S.nopacity);
     nview.classList.toggle('bars', S.nshow === 1);
     nview.classList.toggle('nonames', !S.nnames);
-    const key = [S.nshow, S.nbars, S.nbeats, S.ntempo].join();
-    if (key !== notesSettingsChanged.key) { notesSettingsChanged.key = key; resetBars(); }
+    const key = [S.nshow, S.nbars, S.cbeats, S.ctempo, click.on && click.t0].join();
+    if (key !== notesSettingsChanged.key) {
+      notesSettingsChanged.key = key; resetBars();
+      if (click.on) tr.t0 = click.t0;
+    }
     shownKey = null;
     nview.classList.remove('faded');
     renderNotes();
