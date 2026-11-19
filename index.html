@@ -39,6 +39,22 @@
     max-height: calc(100vh - 74px); overflow-y: auto;
   }
   #panel[hidden] { display: none; }
+  /* Title strip: drag it to pull the panel loose and move it; the corner grip resizes a loose panel */
+  #head {
+    position: sticky; top: -14px; z-index: 1; display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin: -14px -16px 10px; padding: 8px 10px 8px 16px; border-radius: 16px 16px 0 0;
+    background: rgba(18, 20, 30, .96); cursor: grab; touch-action: none; user-select: none;
+    color: #6f778d; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  }
+  #head:active { cursor: grabbing; }
+  #head button { padding: 3px 10px; font-size: 11px; letter-spacing: 0; text-transform: none; }
+  #panel.float {
+    right: auto; max-width: none; max-height: none; resize: both;
+    min-width: 200px; min-height: 120px; box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
+  }
+  #panel.peek #head { opacity: 0; }
+  #panel.float.peek { box-shadow: none; }
+  #head { transition: opacity .2s; }
   /* While Hue or Color spread is in hand, everything but those two sliders clears out of the way */
   #panel, #panel details > * { transition: opacity .2s, background-color .2s, border-color .2s, box-shadow .2s; }
   #panel.peek { background-color: transparent; border-color: transparent; }
@@ -96,6 +112,7 @@
 </div>
 
 <div id="panel" class="ui">
+  <div id="head"><span>Controls</span><button id="detach" title="Pull the panel loose to move and resize it">Detach</button></div>
   <div id="rows"></div>
   <details id="presets" open>
     <summary>Presets</summary>
@@ -1911,6 +1928,70 @@
   // ---------- UI chrome ----------
   const panel = document.getElementById('panel');
   const togglePanel = () => { panel.hidden = !panel.hidden; };
+
+  // A loose panel sits where it was dragged, at the size it was given, and remembers both
+  const FLOAT_STORE = 'rach-viz-panel';
+  const detachBtn = document.getElementById('detach');
+  const saveFloat = () => {
+    try {
+      if (!panel.classList.contains('float')) return localStorage.removeItem(FLOAT_STORE);
+      const { left, top, width, height } = panel.style;
+      localStorage.setItem(FLOAT_STORE, JSON.stringify({ left, top, width, height }));
+    } catch {}
+  };
+  // Keep the title strip on screen so the panel can always be grabbed again
+  const clampFloat = () => {
+    if (!panel.classList.contains('float') || panel.hidden) return;
+    const r = panel.getBoundingClientRect();
+    if (r.height > innerHeight) panel.style.height = innerHeight + 'px';
+    if (r.width > innerWidth) panel.style.width = innerWidth + 'px';
+    const w = Math.min(r.width, innerWidth);
+    panel.style.left = Math.max(0, Math.min(innerWidth - w, r.left)) + 'px';
+    panel.style.top = Math.max(0, Math.min(innerHeight - 40, r.top)) + 'px';
+  };
+  const setFloat = (on, box) => {
+    if (on) {
+      const r = panel.getBoundingClientRect();
+      box ||= { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' };
+      Object.assign(panel.style, box);
+    } else {
+      panel.style.left = panel.style.top = panel.style.width = panel.style.height = '';
+    }
+    panel.classList.toggle('float', on);
+    detachBtn.textContent = on ? 'Dock' : 'Detach';
+    detachBtn.title = on ? 'Put the panel back in the corner' : 'Pull the panel loose to move and resize it';
+    clampFloat();
+    saveFloat();
+  };
+  try { const box = JSON.parse(localStorage.getItem(FLOAT_STORE)); if (box) setFloat(true, box); } catch {}
+  detachBtn.onclick = () => setFloat(!panel.classList.contains('float'));
+
+  const head = document.getElementById('head');
+  head.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    if (!panel.classList.contains('float')) setFloat(true);
+    const r = panel.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    head.setPointerCapture(e.pointerId);
+    const move = ev => {
+      panel.style.left = Math.max(0, Math.min(innerWidth - r.width, ev.clientX - dx)) + 'px';
+      panel.style.top = Math.max(0, Math.min(innerHeight - 40, ev.clientY - dy)) + 'px';
+    };
+    const end = () => {
+      head.removeEventListener('pointermove', move);
+      head.removeEventListener('pointerup', end);
+      head.removeEventListener('pointercancel', end);
+      saveFloat();
+    };
+    head.addEventListener('pointermove', move);
+    head.addEventListener('pointerup', end);
+    head.addEventListener('pointercancel', end);
+    e.preventDefault();
+  });
+  head.addEventListener('dblclick', e => { if (!e.target.closest('button')) setFloat(!panel.classList.contains('float')); });
+  // The corner grip changes the inline size; store it once the drag settles
+  let sizeTimer;
+  new ResizeObserver(() => { clearTimeout(sizeTimer); sizeTimer = setTimeout(saveFloat, 200); }).observe(panel);
+  addEventListener('resize', clampFloat);
   const toggleFs = () => {
     if (document.fullscreenElement) document.exitFullscreen();
     else document.documentElement.requestFullscreen().catch(() => {});
