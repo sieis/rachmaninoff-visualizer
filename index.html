@@ -96,13 +96,20 @@
   }
   #notes[hidden] { display: none; }
   #notes:hover { border-color: rgba(255, 255, 255, .14); }
-  #notesClose {
-    position: absolute; top: 4px; right: 4px; z-index: 1; padding: 1px 7px; font-size: 12px;
-    background: rgba(18, 20, 30, .85); opacity: 0; transition: opacity .2s;
+  #notesTools {
+    position: absolute; top: 4px; right: 4px; z-index: 2; display: flex; gap: 4px;
+    opacity: 0; transition: opacity .2s;
   }
-  #notes:hover #notesClose { opacity: 1; }
-  body.idle #notes { border-color: transparent; }
-  body.idle #notesClose { opacity: 0; }
+  #notesTools button { padding: 1px 7px; font-size: 12px; background: rgba(18, 20, 30, .85); }
+  #notes:hover #notesTools, #notes.open #notesTools { opacity: 1; }
+  body.idle #notes:not(.open) #notesTools { opacity: 0; }
+  /* The window's own settings, dropped down from the gear over the staff */
+  #notesSettings {
+    position: absolute; top: 30px; right: 4px; z-index: 2; width: 230px; max-width: calc(100% - 8px);
+    max-height: calc(100% - 34px); overflow-y: auto; padding: 10px 12px 2px; border-radius: 10px; cursor: auto;
+    background: rgba(18, 20, 30, .95); border: 1px solid rgba(255, 255, 255, .08);
+  }
+  #notesSettings[hidden] { display: none; }
   .nview {
     flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 6px 12px 8px;
     container-type: size; transition: opacity .3s;
@@ -154,7 +161,11 @@
 </div>
 
 <div id="notes" hidden role="region" aria-label="Notes">
-  <button id="notesClose" title="Close (N)" aria-label="Close notes">✕</button>
+  <div id="notesTools">
+    <button id="notesGear" title="Settings" aria-label="Notes settings" aria-expanded="false">⚙</button>
+    <button id="notesClose" title="Close (N)" aria-label="Close notes">✕</button>
+  </div>
+  <div id="notesSettings" hidden></div>
   <div class="nview" id="nview" aria-live="polite">
     <div class="chord"></div>
     <div class="names"></div>
@@ -241,17 +252,20 @@
       { key: 'wwind',     label: 'Wind',            min: -1,   max: 1,   step: 0.01, def: 0,   when: () => S.weather > 0 },
       { key: 'wspeed',    label: 'Fall speed',      min: 0.3,  max: 3,   step: 0.01, def: 1,   when: () => S.weather > 0 },
     ] },
-    // How the two boxes look, and what the notes window shows. These belong to this screen,
-    // so presets and Randomize leave them alone.
+    // The settings below belong to this screen, so presets and Randomize leave them alone.
     { title: 'Windows', controls: [
       { key: 'popacity',  label: 'Controls opacity', min: 0,   max: 1,   step: 0.01, def: 0.85, local: true },
-      { key: 'nopacity',  label: 'Notes opacity',   min: 0,    max: 1,   step: 0.01, def: 0.6,  local: true },
-      { key: 'nshow',     label: 'Notes show',      min: 0,    max: 1,   step: 1,    def: 1, names: ['Chord', 'Bars'], local: true },
-      { key: 'nnames',    label: 'Note names',      min: 0,    max: 1,   step: 1,    def: 1, names: ['Hide', 'Show'], local: true },
-      { key: 'nbars',     label: 'Bars',            min: 1,    max: 8,   step: 1,    def: 4,  local: true, when: () => S.nshow === 1 },
     ] },
-    // A metronome. The notes window's bars take their tempo and meter from here.
-    { title: 'Click', controls: [
+    // What the notes window shows. These live in the window's own settings drawer.
+    { title: 'Notes', home: ['notes'], controls: [
+      { key: 'nshow',     label: 'Show',            min: 0,    max: 1,   step: 1,    def: 1, names: ['Chord', 'Bars'], local: true },
+      { key: 'nnames',    label: 'Names',           min: 0,    max: 1,   step: 1,    def: 1, names: ['Hide', 'Show'], local: true },
+      { key: 'nbars',     label: 'Bars',            min: 1,    max: 8,   step: 1,    def: 4,  local: true, when: () => S.nshow === 1 },
+      { key: 'nopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.6,  local: true },
+    ] },
+    // A metronome. The notes window's bars take their tempo and meter from here. It has a copy
+    // in the notes window's drawer, and the two move together.
+    { title: 'Click', home: ['panel', 'notes'], controls: [
       { key: 'ctempo',    label: 'Tempo (BPM)',     min: 40,   max: 220, step: 1,    def: 90, local: true },
       { key: 'cbeats',    label: 'Beats per bar',   min: 2,    max: 7,   step: 1,    def: 4,  local: true },
       { key: 'cvol',      label: 'Volume',          min: 0,    max: 1,   step: 0.01, def: 0.6, local: true },
@@ -270,14 +284,13 @@
   const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch {} };
 
   const rows = document.getElementById('rows');
-  const inputs = {}, sections = { Presets: document.getElementById('presets') };
+  // inputs[key]: { set, rows }. A control can have a row in the main panel and another in the
+  // notes window's drawer; set() moves every copy.
+  const inputs = {}, sections = { Presets: document.getElementById('presets') }, drawerSections = {};
+  const drawer = document.getElementById('notesSettings');
   const changed = () => { save(); dropHash(); syncRows(); clickSettingsChanged(); notesSettingsChanged(); };
   let peekUntil = 0, peek = 0; // when the tall colour band should stand until, and how far up it is (0..1)
-  for (const g of GROUPS) {
-    const section = sections[g.title] = document.createElement('details');
-    section.open = true;
-    section.innerHTML = `<summary>${g.title}</summary>`;
-    for (const c of g.controls) {
+  const makeRow = (c, copy) => {
       const row = document.createElement('div');
       let set; // takes any number, keeps the nearest value the control allows
       if (c.choice) {
@@ -285,13 +298,13 @@
         row.setAttribute('role', 'radiogroup');
         row.setAttribute('aria-label', c.label);
         row.innerHTML = (c.tag ? `<div class="tag">${c.label}</div>` : '') + c.names.map((name, i) =>
-          `<label><input type="radio" name="${c.key}" value="${i}"><span>${name}</span></label>`).join('');
+          `<label><input type="radio" name="${c.key}-${copy}" value="${i}"><span>${name}</span></label>`).join('');
         const radios = [...row.querySelectorAll('input')];
         set = v => {
           S[c.key] = Math.min(c.max, Math.max(c.min, Math.round(v) || 0));
           radios[S[c.key]].checked = true;
         };
-        row.addEventListener('change', e => { S[c.key] = +e.target.value; changed(); });
+        row.addEventListener('change', e => { inputs[c.key].set(+e.target.value); changed(); });
       } else {
         row.className = 'row';
         row.innerHTML = `<label><span>${c.label}</span><output></output></label>
@@ -300,7 +313,7 @@
         const show = () => out.textContent = c.names ? c.names[+input.value] : (+input.value).toFixed(c.step < 1 ? 2 : 0);
         // the range input clamps and snaps to its step
         set = v => { input.value = v; S[c.key] = +input.value; show(); };
-        input.addEventListener('input', () => { S[c.key] = +input.value; show(); changed(); });
+        input.addEventListener('input', () => { inputs[c.key].set(+input.value); changed(); });
         if (c.key === 'hue' || c.key === 'spread') {
           // The colour band above the keys stands tall while either slider is in hand
           row.classList.add('live');
@@ -311,8 +324,19 @@
           for (const type of ['pointerup', 'pointercancel', 'change', 'blur']) input.addEventListener(type, letGo);
         }
       }
+      return { row, set };
+  };
+  for (const g of GROUPS) for (const [copy, home] of (g.home || ['panel']).entries()) {
+    const section = document.createElement('details');
+    (home === 'panel' ? sections : drawerSections)[g.title] = section;
+    section.open = true;
+    section.innerHTML = `<summary>${g.title}</summary>`;
+    if (home === 'notes') drawer.appendChild(section);
+    for (const c of g.controls) {
+      const { row, set } = makeRow(c, copy);
+      const inp = inputs[c.key] ||= { sets: [], rows: [], set: v => inp.sets.forEach(f => f(v)) };
+      inp.sets.push(set); inp.rows.push(row);
       set(S[c.key]);
-      inputs[c.key] = { set, row };
       section.appendChild(row);
     }
   }
@@ -323,7 +347,7 @@
     col.append(...titles.map(t => sections[t]));
   }
   // Some sliders only apply in one mode; show them only then
-  function syncRows() { for (const c of CONTROLS) if (c.when) inputs[c.key].row.hidden = !c.when(); }
+  function syncRows() { for (const c of CONTROLS) if (c.when) inputs[c.key].rows.forEach(r => r.hidden = !c.when()); }
   syncRows();
   document.getElementById('reset').onclick = () => {
     for (const c of CONTROLS) inputs[c.key].set(c.def);
@@ -2051,12 +2075,16 @@
   const toggleClick = () => click.on ? stopClick() : startClick();
   // A new tempo or meter counts in again from bar 1
   function clickSettingsChanged() { if (click.on && click.key !== clickKey()) startClick(); }
-  const clickPair = document.createElement('div');
-  clickPair.className = 'pair';
-  clickPair.innerHTML = '<button title="Click track (M)">Start click</button>';
-  const clickBtn = clickPair.firstChild;
-  sections.Click.insertBefore(clickPair, sections.Click.children[1]);
-  clickBtn.onclick = toggleClick;
+  // A start button in each copy of the Click section
+  const clickBtns = [sections.Click, drawerSections.Click].map(section => {
+    const pair = document.createElement('div');
+    pair.className = 'pair';
+    pair.innerHTML = '<button title="Click track (M)">Start click</button>';
+    section.insertBefore(pair, section.children[1]);
+    pair.firstChild.onclick = toggleClick;
+    return pair.firstChild;
+  });
+  const clickBtn = { set textContent(t) { clickBtns.forEach(b => b.textContent = t); } };
 
   // ---------- Notes window ----------
   // Shows what is played (MIDI, pointer and microphone together) on a grand staff: either the
@@ -2203,6 +2231,7 @@
   // or not. Without it, the first note starts the clock, and after a whole page of silence the
   // next note starts over at bar 1.
   const BEAT_W = 40;
+  const CHORD_GAP = 90, CHORD_SPAN = 250; // ms: how near notes must be to count as one chord
   const tr = { t0: null, page: 0, last: 0, events: [] }; // events: { beat, notes: Map(n -> { off }) }
   const beatMs = () => 60000 / S.ctempo, pageBeats = () => S.nbars * S.cbeats;
   const barsWidth = () => CLEF + pageBeats() * BEAT_W + 8;
@@ -2213,9 +2242,14 @@
     const q = Math.max(0, Math.round((now - tr.t0) / beatMs() * 2) / 2);
     const page = Math.floor(q / pageBeats()), beat = q - page * pageBeats();
     if (page !== tr.page) { tr.page = page; tr.events = []; }
-    let ev = tr.events.find(e => e.beat === beat);
-    if (!ev) tr.events.push(ev = { beat, notes: new Map() });
+    // Notes struck a moment apart (a chord a little uneven, or rolled) are one chord, even if
+    // they round to different eighths
+    const prev = tr.events[tr.events.length - 1];
+    let ev = prev && now - prev.lastOn < CHORD_GAP && now - prev.firstOn < CHORD_SPAN ? prev
+      : tr.events.find(e => e.beat === beat);
+    if (!ev) tr.events.push(ev = { beat, notes: new Map(), firstOn: now });
     ev.notes.set(n, { off: null });
+    ev.lastOn = now;
     tr.last = now;
   }
   function recordOff(n, now) {
@@ -2234,7 +2268,17 @@
     for (let i = 1; i < S.nbars; i++) bars.push(CLEF + i * S.cbeats * BEAT_W);
     let out = staffLines(w, bars);
     const pageEnd = beatX(pageBeats()) - 8;
-    const rowEnds = [-Infinity, -Infinity]; // where each row of names ends, left to right
+    // Names go above the treble staff, and bass notes' names between the staves. A name that
+    // would run into the one before it moves to its second place: a lower row up top, or
+    // under the bass staff.
+    const places = { top: [11, 22], bass: [125, 235] }, ends = { top: [-Infinity, -Infinity], bass: [-Infinity, -Infinity] };
+    const nameAt = (text, x, where, bright) => {
+      const half = text.length * 2.9 + 2, e = ends[where];
+      const row = e[0] <= x - half ? 0 : e[1] <= x - half ? 1 : 0;
+      e[row] = x + half;
+      return `<text x="${x}" y="${places[where][row]}" font-size="10" text-anchor="middle"
+        fill="${bright ? '#eef1f8' : '#aab1c5'}">${text}</text>`;
+    };
     for (const ev of tr.events) {
       const ns = [...ev.notes.keys()].sort((a, b) => a - b);
       const { name, spell } = nameChord(ns);
@@ -2244,16 +2288,14 @@
         return Math.min(pageEnd, beatX((off - tr.t0) / beatMs() - tr.page * pageBeats()));
       };
       out += chordAt(ns, spell, x, tail);
-      if (S.nnames) {
-        // A chord by its name, anything else by its notes. A label that would run into the one
-        // before it drops to a second row.
-        const isChord = name && new Set(ns.map(n => n % 12)).size > 2;
-        const label = isChord ? name : [...new Set(ns.map(n => pcName(spell.get(n % 12))))].join(' ');
-        const half = label.length * 2.9 + 2;
-        const row = rowEnds[0] <= x - half ? 0 : rowEnds[1] <= x - half ? 1 : 0;
-        rowEnds[row] = x + half;
-        out += `<text x="${x}" y="${11 + row * 11}" font-size="10" text-anchor="middle"
-          fill="${isChord ? '#eef1f8' : '#aab1c5'}">${label}</text>`;
+      if (!S.nnames) continue;
+      // A chord by its name, beside whichever staff holds it; other notes by their own names
+      const letters = list => [...new Set(list.map(n => pcName(spell.get(n % 12))))].join(' ');
+      const hi = ns.filter(n => n >= 60), lo = ns.filter(n => n < 60);
+      if (name && new Set(ns.map(n => n % 12)).size > 2) out += nameAt(name, x, hi.length ? 'top' : 'bass', true);
+      else {
+        if (hi.length) out += nameAt(letters(hi), x, 'top');
+        if (lo.length) out += nameAt(letters(lo), x, 'bass');
       }
     }
     const b = pageBeat(now);
@@ -2346,6 +2388,15 @@
   const toggleNotes = () => setNotes(!notesUi.on);
   document.getElementById('notesBtn').onclick = toggleNotes;
   document.getElementById('notesClose').onclick = () => setNotes(false);
+  // The gear drops the window's settings down over the staff, and hides them again
+  const gear = document.getElementById('notesGear');
+  const setDrawer = open => {
+    drawer.hidden = !open; notesFrame.classList.toggle('open', open);
+    gear.setAttribute('aria-expanded', open);
+    notesUi.drawer = open; saveNotesUi();
+  };
+  gear.onclick = () => setDrawer(drawer.hidden);
+  setDrawer(!!notesUi.drawer);
   addEventListener('resize', () => { if (notesShown()) placeNotes(); });
   new ResizeObserver(() => {
     if (!notesShown()) return;
@@ -2356,7 +2407,7 @@
     notesFrame.addEventListener('pointerdown', e => {
       const r = notesFrame.getBoundingClientRect();
       // the close button, and the corner that resizes, keep their own jobs
-      if (e.target.closest('button') || (e.clientX > r.right - 20 && e.clientY > r.bottom - 20)) return;
+      if (e.target.closest('button, #notesSettings') || (e.clientX > r.right - 20 && e.clientY > r.bottom - 20)) return;
       grab = { dx: e.clientX - r.left, dy: e.clientY - r.top };
       notesFrame.setPointerCapture(e.pointerId);
       e.preventDefault();
