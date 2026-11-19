@@ -36,7 +36,7 @@
 
   #panel {
     position: fixed; top: 60px; right: 14px; width: max-content; max-width: calc(100vw - 28px); padding: 14px 16px 12px;
-    border-radius: 16px; background: rgba(18, 20, 30, .85); border: 1px solid rgba(255, 255, 255, .08);
+    border-radius: 16px; background: rgba(18, 20, 30, var(--panel-a, .85)); border: 1px solid rgba(255, 255, 255, .08);
     max-height: calc(100vh - 74px); overflow-y: auto;
   }
   #panel[hidden] { display: none; }
@@ -86,46 +86,42 @@
   }
   input[type=text]:focus { border-color: #8ea2ff; }
 
-  /* Notes window: the notes and chord being played, on a grand staff. It stays up while the
-     rest of the UI hides; only its title bar fades. */
+  /* Notes window: what is being played, on a grand staff. A see-through box with no title bar:
+     drag it anywhere, resize it from its corner. It stays up while the rest of the UI hides. */
   #notes {
-    position: fixed; left: 14px; top: 60px; width: 340px; height: 260px; min-width: 180px; min-height: 130px;
-    display: flex; flex-direction: column; overflow: hidden; resize: both; border-radius: 12px;
-    background: rgba(10, 12, 20, .92); border: 1px solid rgba(255, 255, 255, .1);
-    transition: border-color .4s;
+    position: fixed; left: 14px; top: 60px; width: 380px; height: 260px; min-width: 160px; min-height: 110px;
+    display: flex; flex-direction: column; overflow: hidden; resize: both; border-radius: 12px; cursor: move;
+    background: rgba(10, 12, 20, var(--notes-a, .6)); border: 1px solid transparent;
+    user-select: none; touch-action: none; transition: border-color .3s;
   }
   #notes[hidden] { display: none; }
-  #notes .head {
-    display: flex; align-items: center; gap: 2px; padding: 4px 6px 2px 12px; cursor: move;
-    user-select: none; touch-action: none; transition: opacity .4s;
-    color: #aab1c5; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  #notes:hover { border-color: rgba(255, 255, 255, .14); }
+  #notesClose {
+    position: absolute; top: 4px; right: 4px; z-index: 1; padding: 1px 7px; font-size: 12px;
+    background: rgba(18, 20, 30, .85); opacity: 0; transition: opacity .2s;
   }
-  #notes .head span { flex: 1; }
-  #notes .head button {
-    padding: 2px 8px; font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none;
-    background: transparent; border-color: transparent;
-  }
-  #notes .head button:hover { background: rgba(40, 44, 62, .92); }
+  #notes:hover #notesClose { opacity: 1; }
   body.idle #notes { border-color: transparent; }
-  body.idle #notes .head { opacity: 0; }
+  body.idle #notesClose { opacity: 0; }
   .nview {
-    flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 12px 8px;
+    flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 6px 12px 8px;
     container-type: size; transition: opacity .3s;
   }
   .nview.faded { opacity: .4; }
+  /* Fixed heights, so the staff below holds its size whatever the names say */
   .nview .chord {
-    text-align: center; font-weight: 600; line-height: 1.15; color: #eef1f8;
-    font-size: clamp(16px, 13cqh, 72px); min-height: 1.15em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: none; height: clamp(20px, 15cqh, 84px); display: flex; align-items: center; justify-content: center;
+    font-weight: 600; color: #eef1f8; font-size: clamp(16px, 12cqh, 72px); white-space: nowrap; overflow: hidden;
   }
+  .nview .chord .small { font-size: .6em; }
   .nview .names {
-    text-align: center; color: #8a92a8; font-size: clamp(11px, 5.5cqh, 22px); min-height: 1.4em;
+    flex: none; height: clamp(15px, 8cqh, 30px); text-align: center; color: #8a92a8; font-size: clamp(11px, 5.5cqh, 22px);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
   }
+  .nview.bars .chord, .nview.bars .names, .nview.nonames .chord, .nview.nonames .names { display: none; }
   .nview .staff { flex: 1; min-height: 0; }
   .nview svg { display: block; width: 100%; height: 100%; }
   .nview .glyph { font-family: "Noto Music", "Bravura", "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", serif; }
-  body.popped { background: #0a0c14; }
-  body.popped .nview { height: 100vh; padding: 10px 14px; }
 </style>
 </head>
 <body>
@@ -157,11 +153,8 @@
   </details>
 </div>
 
-<div id="notes" hidden role="dialog" aria-label="Notes">
-  <div class="head"><span>Notes</span>
-    <button id="notesPop" title="Open in its own window">Pop out</button>
-    <button id="notesClose" title="Close (N)" aria-label="Close">✕</button>
-  </div>
+<div id="notes" hidden role="region" aria-label="Notes">
+  <button id="notesClose" title="Close (N)" aria-label="Close notes">✕</button>
   <div class="nview" id="nview" aria-live="polite">
     <div class="chord"></div>
     <div class="names"></div>
@@ -248,6 +241,17 @@
       { key: 'wwind',     label: 'Wind',            min: -1,   max: 1,   step: 0.01, def: 0,   when: () => S.weather > 0 },
       { key: 'wspeed',    label: 'Fall speed',      min: 0.3,  max: 3,   step: 0.01, def: 1,   when: () => S.weather > 0 },
     ] },
+    // How the two boxes look, and what the notes window shows. These belong to this screen,
+    // so presets and Randomize leave them alone.
+    { title: 'Windows', controls: [
+      { key: 'popacity',  label: 'Controls opacity', min: 0,   max: 1,   step: 0.01, def: 0.85, local: true },
+      { key: 'nopacity',  label: 'Notes opacity',   min: 0,    max: 1,   step: 0.01, def: 0.6,  local: true },
+      { key: 'nshow',     label: 'Notes show',      min: 0,    max: 1,   step: 1,    def: 1, names: ['Chord', 'Bars'], local: true },
+      { key: 'nnames',    label: 'Note names',      min: 0,    max: 1,   step: 1,    def: 1, names: ['Hide', 'Show'], local: true },
+      { key: 'nbars',     label: 'Bars',            min: 1,    max: 8,   step: 1,    def: 4,  local: true, when: () => S.nshow === 1 },
+      { key: 'nbeats',    label: 'Beats per bar',   min: 2,    max: 7,   step: 1,    def: 4,  local: true, when: () => S.nshow === 1 },
+      { key: 'ntempo',    label: 'Tempo (BPM)',     min: 40,   max: 200, step: 1,    def: 90, local: true, when: () => S.nshow === 1 },
+    ] },
     { title: 'Image', controls: [
       { key: 'iopacity',  label: 'Opacity',         min: 0,    max: 1,   step: 0.01, def: 0.5 },
       { key: 'iblur',     label: 'Blur',            min: 0,    max: 1,   step: 0.01, def: 0 },
@@ -263,7 +267,7 @@
 
   const rows = document.getElementById('rows');
   const inputs = {}, sections = { Presets: document.getElementById('presets') };
-  const changed = () => { save(); dropHash(); syncRows(); };
+  const changed = () => { save(); dropHash(); syncRows(); notesSettingsChanged(); };
   let peekUntil = 0, peek = 0; // when the tall colour band should stand until, and how far up it is (0..1)
   for (const g of GROUPS) {
     const section = sections[g.title] = document.createElement('details');
@@ -309,7 +313,7 @@
     }
   }
   // Short sections share a column
-  for (const titles of [['Keyboard'], ['Microphone', 'Particles', 'Weather'], ['Geometry'], ['Reaction', 'Image', 'Presets']]) {
+  for (const titles of [['Keyboard'], ['Microphone', 'Particles', 'Weather', 'Windows'], ['Geometry'], ['Reaction', 'Image', 'Presets']]) {
     const col = document.createElement('div');
     rows.appendChild(col);
     col.append(...titles.map(t => sections[t]));
@@ -323,7 +327,7 @@
   };
   // Every control gets a uniform random value from its own range
   const randomize = () => {
-    for (const c of CONTROLS) inputs[c.key].set(c.min + Math.random() * (c.max - c.min));
+    for (const c of CONTROLS) if (!c.local) inputs[c.key].set(c.min + Math.random() * (c.max - c.min));
     changed();
   };
   document.getElementById('random').onclick = randomize;
@@ -413,13 +417,14 @@
   // ---------- Presets ----------
   // A preset code is every control as key=value, e.g. "speed=0.35&width=0.8&...".
   // The same string after a # in the URL loads it on arrival.
-  const presetCode = () => CONTROLS.map(c => `${c.key}=${S[c.key]}`).join('&');
+  const presetCode = () => CONTROLS.filter(c => !c.local).map(c => `${c.key}=${S[c.key]}`).join('&');
   const presetLink = () => location.href.split('#')[0] + '#' + presetCode();
   // Accepts a code or a whole link. Sliders the code doesn't mention keep their value.
   function loadPreset(text) {
     const params = new URLSearchParams(text.trim().split('#').pop());
     let found = 0;
     for (const c of CONTROLS) {
+      if (c.local) continue;
       const raw = params.get(c.key), v = parseFloat(raw);
       if (raw == null || !Number.isFinite(v)) continue;
       inputs[c.key].set(v); found++;
@@ -562,12 +567,12 @@
     }
     if (mode === 3) strike(bar);
     burst(n, vel, Math.round(amount() * 0.5 * (0.4 + vel)));
-    notesChanged();
+    notesChanged(n, true);
   }
   function noteOff(n, mic = false) {
     mic = !!mic;
     const bar = held.get(n + mic * 128);
-    if (bar) { bar.end = performance.now(); held.delete(n + mic * 128); notesChanged(); }
+    if (bar) { bar.end = performance.now(); held.delete(n + mic * 128); notesChanged(n, false); }
     if (modeFor(mic) === 0) flash[n] = Math.max(flash[n], 0.7); // with no bar, the key itself fades out
   }
 
@@ -1960,6 +1965,7 @@
       ctx.globalAlpha = 1;
     }
 
+    notesTick(now);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -1996,9 +2002,8 @@
   wake();
 
   // ---------- Notes window ----------
-  // Names what is held (MIDI, pointer and microphone together) and draws it on a grand staff.
-  // The window can be dragged by its title bar, resized from its corner, or popped out into a
-  // window of its own (an always-on-top one where the browser offers it).
+  // Shows what is played (MIDI, pointer and microphone together) on a grand staff: either the
+  // chord held now, with its name, or the notes written along a few bars in time.
   const LETTERS = 'CDEFGAB', LETTER_PC = [0, 2, 4, 5, 7, 9, 11];
   const ACC_TEXT = { '-2': '𝄫', '-1': '♭', 0: '', 1: '♯', 2: '𝄪' };
   // [letter, accidental] for each pitch class, when nothing better is known
@@ -2061,112 +2066,187 @@
     return { name, sub: chord.sub, spell };
   }
 
-  // ---- Grand staff drawing, framed around what is drawn and scaled to fit ----
+  // ---- Grand staff drawing ----
   // Steps count letters up from middle C (C4 = 0). Treble lines are E4..F5, bass lines G2..A3.
-  const SP = 5, TT = 60, BT = 160, VW = 220;
+  // The box is the same height whatever is played, so the staff holds still: notes more than
+  // two ledger lines off the staff are written an octave (or two) nearer, marked 8va or 8vb.
+  const SP = 5, TT = 50, BT = 150, VH = 240, CLEF = 44;
   const stepOf = (n, sp) => (Math.floor((n - sp[1]) / 12) - 1) * 7 + sp[0] - 28;
   const yTreble = step => TT + (10 - step) * SP;
   const yBass = step => BT + (-2 - step) * SP;
-  function drawStaff(notes, spell) {
-    let out = '', top = TT - 22, bottom = BT + 52;
-    const line = (x1, y1, x2, y2, w = 1, c = '#8a92a8') =>
-      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="${w}"/>`;
-    for (let k = 0; k < 5; k++) out += line(8, TT + k * 2 * SP, VW - 6, TT + k * 2 * SP) + line(8, BT + k * 2 * SP, VW - 6, BT + k * 2 * SP);
-    out += line(8, TT, 8, BT + 40, 1.4) + line(VW - 6, TT, VW - 6, BT + 40, 1.4);
+  const svgLine = (x1, y1, x2, y2, w = 1, c = '#8a92a8') =>
+    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="${w}"/>`;
+  // The two staves, clefs, and a bar line at each x in `bars`
+  function staffLines(w, bars = []) {
+    let out = '';
+    for (let k = 0; k < 5; k++) out += svgLine(8, TT + k * 2 * SP, w - 6, TT + k * 2 * SP) + svgLine(8, BT + k * 2 * SP, w - 6, BT + k * 2 * SP);
+    out += svgLine(8, TT, 8, BT + 40, 1.4) + svgLine(w - 6, TT, w - 6, BT + 40, 1.4);
+    for (const x of bars) out += svgLine(x, TT, x, BT + 40, 1);
     // Clefs from the music font, set so the G clef curls round G4 and the F clef's dots sit either side of F3
     out += `<text class="glyph" x="14" y="${yTreble(4) + 9}" font-size="40" fill="#c9cfdd">𝄞</text>`;
     out += `<text class="glyph" x="14" y="${yBass(-4) + 30}" font-size="44" fill="#c9cfdd">𝄢</text>`;
-    // Treble takes middle C and up. A staff whose notes run far off it reads an octave or two over.
+    return out;
+  }
+  // One chord at x = cx. `tail(n)`, if given, is the x where note n's held line ends.
+  function chordAt(notes, spell, cx, tail) {
+    let out = '';
     const groups = [
-      { y: yTreble, ns: notes.filter(n => n >= 60), lines: [2, 10] },
-      { y: yBass, ns: notes.filter(n => n < 60), lines: [-10, -2] },
+      { y: yTreble, ns: notes.filter(n => n >= 60), lines: [2, 10], up: true },
+      { y: yBass, ns: notes.filter(n => n < 60), lines: [-10, -2], up: false },
     ];
-    const cx = 132;
     for (const g of groups) {
       if (!g.ns.length) continue;
-      let pts = g.ns.map(n => ({ n, sp: spell.get(n % 12), step: stepOf(n, spell.get(n % 12)) }));
+      const pts = g.ns.map(n => ({ n, sp: spell.get(n % 12), step: stepOf(n, spell.get(n % 12)) }));
       let shift = 0;
-      const far = g.y === yTreble ? () => Math.max(...pts.map(p => p.step)) + shift > 17
-                                  : () => Math.min(...pts.map(p => p.step)) + shift < -18;
-      while (far() && Math.abs(shift) < 14) shift += g.y === yTreble ? -7 : 7;
+      const far = () => g.up ? Math.max(...pts.map(p => p.step)) + shift > 15 : Math.min(...pts.map(p => p.step)) + shift < -15;
+      while (far() && Math.abs(shift) < 14) shift += g.up ? -7 : 7;
       pts.forEach(p => p.step += shift);
-      if (shift) {
-        const label = Math.abs(shift) === 14 ? (shift < 0 ? '15ma' : '15mb') : (shift < 0 ? '8va' : '8vb');
-        const y = shift < 0 ? g.y(Math.max(...pts.map(p => p.step), 10)) - 10 : g.y(Math.min(...pts.map(p => p.step), -10)) + 18;
-        out += `<text x="${cx - 18}" y="${y}" font-size="11" font-style="italic" fill="#aab1c5">${label}</text>`;
-        top = Math.min(top, y - 14); bottom = Math.max(bottom, y + 6);
-      }
       pts.sort((a, b) => a.step - b.step || a.n - b.n);
       // A second (or a shared line) can't stack: the upper note steps to the right
       let prev = null;
-      for (const p of pts) {
-        p.col = prev && prev.col === 0 && p.step - prev.step <= 1 ? 1 : 0;
-        prev = p;
-      }
+      for (const p of pts) { p.col = prev && prev.col === 0 && p.step - prev.step <= 1 ? 1 : 0; prev = p; }
       const shifted = pts.some(p => p.col);
-      // Ledger lines, wide enough for both columns
       const [lo, hi] = g.lines, minS = pts[0].step, maxS = pts[pts.length - 1].step;
       const lx1 = cx - 10, lx2 = cx + 10 + (shifted ? 13 : 0);
-      for (let s = lo - 2; s >= minS; s -= 2) out += line(lx1, g.y(s), lx2, g.y(s), 1.2);
-      for (let s = hi + 2; s <= maxS; s += 2) out += line(lx1, g.y(s), lx2, g.y(s), 1.2);
+      for (let s = lo - 2; s >= minS; s -= 2) out += svgLine(lx1, g.y(s), lx2, g.y(s), 1.2);
+      for (let s = hi + 2; s <= maxS; s += 2) out += svgLine(lx1, g.y(s), lx2, g.y(s), 1.2);
+      if (shift) {
+        const label = Math.abs(shift) === 14 ? (g.up ? '15ma' : '15mb') : (g.up ? '8va' : '8vb');
+        const y = g.up ? g.y(Math.max(maxS, 10)) - 8 : g.y(Math.min(minS, -10)) + 14;
+        out += `<text x="${lx2 + 2}" y="${y}" font-size="9" font-style="italic" fill="#aab1c5">${label}</text>`;
+      }
       // Accidentals, top down, each taking the nearest column clear of the ones above it
-      const sameStep = s => pts.filter(q => q.step === s).length > 1;
       const accCols = [];
       for (const p of [...pts].reverse()) {
         const acc = p.sp[1];
-        if (!acc && !sameStep(p.step)) continue;
+        if (!acc && pts.filter(q => q.step === p.step).length < 2) continue;
         let c = 0;
         while ((accCols[c] ||= []).some(s => Math.abs(s - p.step) < 6)) c++;
         accCols[c].push(p.step);
-        const x = cx - 11 - c * 11;
-        out += `<text class="glyph" x="${x}" y="${g.y(p.step) + 4}" font-size="24" text-anchor="end" fill="#dfe3ee">${acc ? ACC_TEXT[acc] : '♮'}</text>`;
+        out += `<text class="glyph" x="${cx - 9 - c * 10}" y="${g.y(p.step) + 4}" font-size="22" text-anchor="end" fill="#dfe3ee">${acc ? ACC_TEXT[acc] : '♮'}</text>`;
       }
       for (const p of pts) {
-        const x = cx + p.col * 13, y = g.y(p.step);
-        top = Math.min(top, y - 10); bottom = Math.max(bottom, y + 10);
+        const x = cx + p.col * 13, y = g.y(p.step), hue = hueOf(p.n);
+        const end = tail?.(p.n);
+        if (end > x + 6) out += `<rect x="${x}" y="${y - 1.6}" width="${end - x}" height="3.2" rx="1.6" fill="hsla(${hue}, 90%, 68%, .45)"/>`;
         out += `<ellipse cx="${x}" cy="${y}" rx="6" ry="4.3" transform="rotate(-20 ${x} ${y})"
-          fill="hsl(${hueOf(p.n)}, 90%, 68%)" stroke="#0a0c14" stroke-width=".6"/>`;
+          fill="hsl(${hue}, 90%, 68%)" stroke="#0a0c14" stroke-width=".6"/>`;
       }
     }
-    return `<svg viewBox="0 ${top} ${VW} ${bottom - top}" preserveAspectRatio="xMidYMid meet" role="img"
-      aria-label="Grand staff">${out}</svg>`;
+    return out;
+  }
+  const svgBox = (w, body) => `<svg viewBox="0 0 ${w} ${VH}" preserveAspectRatio="xMidYMid meet" role="img"
+    aria-label="Grand staff">${body}</svg>`;
+  const spelledName = (n, sp) => pcName(sp) + (Math.floor((n - sp[1]) / 12) - 1);
+
+  // ---- Bars: notes written left to right in time ----
+  // The first note starts a clock at the Tempo setting, and each note lands on the nearest
+  // eighth of a beat. A note past the last bar clears the page and starts it again at the left.
+  // After a whole page of silence the next note starts over at bar 1.
+  const BEAT_W = 40;
+  const tr = { t0: null, page: 0, last: 0, events: [] }; // events: { beat, notes: Map(n -> { off }) }
+  const beatMs = () => 60000 / S.ntempo, pageBeats = () => S.nbars * S.nbeats;
+  const barsWidth = () => CLEF + pageBeats() * BEAT_W + 8;
+  function recordOn(n, now) {
+    if (!notesShown() || S.nshow !== 1) return;
+    if (tr.t0 == null || now - tr.last > pageBeats() * beatMs()) Object.assign(tr, { t0: now, page: 0, events: [] });
+    const q = Math.round((now - tr.t0) / beatMs() * 2) / 2;
+    const page = Math.floor(q / pageBeats()), beat = q - page * pageBeats();
+    if (page !== tr.page) { tr.page = page; tr.events = []; }
+    let ev = tr.events.find(e => e.beat === beat);
+    if (!ev) tr.events.push(ev = { beat, notes: new Map() });
+    ev.notes.set(n, { off: null });
+    tr.last = now;
+  }
+  function recordOff(n, now) {
+    for (const ev of tr.events) { const e = ev.notes.get(n); if (e && e.off == null) e.off = now; }
+  }
+  const resetBars = () => Object.assign(tr, { t0: null, page: 0, events: [] });
+  // Where in the page a moment falls, in beats; null once it is off this page
+  function pageBeat(now) {
+    if (tr.t0 == null) return null;
+    const b = (now - tr.t0) / beatMs() - tr.page * pageBeats();
+    return b >= 0 && b <= pageBeats() ? b : null;
+  }
+  const beatX = b => CLEF + 8 + b * BEAT_W;
+  function drawBars(now) {
+    const w = barsWidth(), bars = [];
+    for (let i = 1; i < S.nbars; i++) bars.push(CLEF + i * S.nbeats * BEAT_W);
+    let out = staffLines(w, bars);
+    const pageEnd = beatX(pageBeats()) - 8;
+    for (const ev of tr.events) {
+      const ns = [...ev.notes.keys()].sort((a, b) => a - b);
+      const { name, spell } = nameChord(ns);
+      const x = beatX(ev.beat);
+      const tail = n => {
+        const off = ev.notes.get(n).off ?? now;
+        return Math.min(pageEnd, beatX((off - tr.t0) / beatMs() - tr.page * pageBeats()));
+      };
+      out += chordAt(ns, spell, x, tail);
+      if (S.nnames && ns.length > 2 && name) out += `<text x="${x}" y="12" font-size="10" text-anchor="middle" fill="#dfe3ee">${name}</text>`;
+    }
+    const b = pageBeat(now);
+    if (b != null && now - tr.last < pageBeats() * beatMs())
+      out += svgLine(beatX(b), TT - 14, beatX(b), BT + 54, 1, 'rgba(142, 162, 255, .5)');
+    return svgBox(w, out);
   }
 
+  // ---- The window ----
+  // A see-through box over the visualizer. Drag it anywhere, resize it from its corner.
   const notesFrame = document.getElementById('notes'), nview = document.getElementById('nview');
   const [chordEl, namesEl, staffEl] = nview.children;
   const NOTES_STORE = 'rach-viz-notes';
   let notesUi = { on: false };
   try { notesUi = { ...notesUi, ...JSON.parse(localStorage.getItem(NOTES_STORE) || '{}') }; } catch {}
   const saveNotesUi = () => { try { localStorage.setItem(NOTES_STORE, JSON.stringify(notesUi)); } catch {} };
-  let shownKey = null, pending = false, popWin = null;
+  const notesShown = () => !notesFrame.hidden;
+  let shownKey = null, pending = false, lastDraw = 0;
 
+  const heldNotes = () => [...new Set([...held.values()].map(b => b.note))].sort((a, b) => a - b);
   function renderNotes() {
     pending = false;
-    const notes = [...new Set([...held.values()].map(b => b.note))].sort((a, b) => a - b);
+    if (!notesShown()) return;
+    if (S.nshow === 1) { staffEl.innerHTML = drawBars(performance.now()); lastDraw = performance.now(); return; }
+    const notes = heldNotes();
     // With every key up, the last chord stays, dimmed, until the next one
     nview.classList.toggle('faded', !notes.length && shownKey !== null);
-    if (!notes.length) return;
+    if (!notes.length) {
+      if (shownKey === null) { chordEl.textContent = ''; namesEl.textContent = 'Play something'; staffEl.innerHTML = svgBox(220, staffLines(220)); }
+      return;
+    }
     const key = notes.join();
     if (key === shownKey) return;
     shownKey = key;
     const { name, sub, spell, small } = nameChord(notes);
-    chordEl.textContent = name || '—';
-    chordEl.style.fontSize = small ? 'clamp(14px, 9cqh, 48px)' : '';
-    namesEl.textContent = (sub ? sub + ' · ' : '') +
-      notes.map(n => { const sp = spell.get(n % 12); return pcName(sp) + (Math.floor((n - sp[1]) / 12) - 1); }).join('  ');
-    staffEl.innerHTML = drawStaff(notes, spell);
+    chordEl.innerHTML = `<span${small ? ' class="small"' : ''}></span>`;
+    chordEl.firstChild.textContent = name || '—';
+    namesEl.textContent = (sub ? sub + ' · ' : '') + notes.map(n => spelledName(n, spell.get(n % 12))).join('  ');
+    staffEl.innerHTML = svgBox(220, staffLines(220) + chordAt(notes, spell, 132));
   }
   // Notes often change several at once (a chord, or a re-struck key); draw once for all of them
-  function notesChanged() {
-    if (pending || (notesFrame.hidden && !popWin)) return;
+  function notesChanged(n, on) {
+    if (!notesShown()) return;
+    if (n != null) (on ? recordOn : recordOff)(n, performance.now());
+    if (pending) return;
     pending = true;
     queueMicrotask(renderNotes);
   }
-  function showEmpty() {
-    if (shownKey !== null) return;
-    chordEl.textContent = '';
-    namesEl.textContent = 'Play something';
-    staffEl.innerHTML = drawStaff([], new Map());
+  // Bars move with time: redraw while the playhead runs or a held note's line grows
+  function notesTick(now) {
+    if (!notesShown() || S.nshow !== 1 || now - lastDraw < 40) return;
+    if (held.size || (tr.t0 != null && now - tr.last < pageBeats() * beatMs() + 200)) renderNotes();
+  }
+  // Called whenever a control moves
+  function notesSettingsChanged() {
+    document.documentElement.style.setProperty('--panel-a', S.popacity);
+    document.documentElement.style.setProperty('--notes-a', S.nopacity);
+    nview.classList.toggle('bars', S.nshow === 1);
+    nview.classList.toggle('nonames', !S.nnames);
+    const key = [S.nshow, S.nbars, S.nbeats, S.ntempo].join();
+    if (key !== notesSettingsChanged.key) { notesSettingsChanged.key = key; resetBars(); }
+    shownKey = null;
+    nview.classList.remove('faded');
+    renderNotes();
   }
 
   // Position and size, kept inside the window
@@ -2180,65 +2260,37 @@
   }
   function setNotes(on) {
     notesUi.on = on; saveNotesUi();
-    if (!on && popWin) popWin.close();
-    notesFrame.hidden = !on || !!popWin;
-    if (on) { placeNotes(); shownKey = null; renderNotes(); showEmpty(); }
+    notesFrame.hidden = !on;
+    if (on) { placeNotes(); notesSettingsChanged(); }
   }
   const toggleNotes = () => setNotes(!notesUi.on);
   document.getElementById('notesBtn').onclick = toggleNotes;
   document.getElementById('notesClose').onclick = () => setNotes(false);
-  addEventListener('resize', () => { if (!notesFrame.hidden) placeNotes(); });
+  addEventListener('resize', () => { if (notesShown()) placeNotes(); });
   new ResizeObserver(() => {
-    if (notesFrame.hidden) return;
+    if (!notesShown()) return;
     notesUi.w = notesFrame.offsetWidth; notesUi.h = notesFrame.offsetHeight; saveNotesUi();
   }).observe(notesFrame);
   {
-    const head = notesFrame.querySelector('.head');
     let grab = null;
-    head.addEventListener('pointerdown', e => {
-      if (e.target.closest('button')) return;
+    notesFrame.addEventListener('pointerdown', e => {
       const r = notesFrame.getBoundingClientRect();
+      // the close button, and the corner that resizes, keep their own jobs
+      if (e.target.closest('button') || (e.clientX > r.right - 20 && e.clientY > r.bottom - 20)) return;
       grab = { dx: e.clientX - r.left, dy: e.clientY - r.top };
-      head.setPointerCapture(e.pointerId);
+      notesFrame.setPointerCapture(e.pointerId);
+      e.preventDefault();
     });
-    head.addEventListener('pointermove', e => {
+    notesFrame.addEventListener('pointermove', e => {
       if (!grab) return;
       notesUi.x = e.clientX - grab.dx; notesUi.y = e.clientY - grab.dy;
       placeNotes();
     });
     const drop = () => { if (grab) { grab = null; notesUi.x = notesFrame.offsetLeft; notesUi.y = notesFrame.offsetTop; saveNotesUi(); } };
-    head.addEventListener('pointerup', drop);
-    head.addEventListener('pointercancel', drop);
+    notesFrame.addEventListener('pointerup', drop);
+    notesFrame.addEventListener('pointercancel', drop);
   }
-
-  // Pop out: the view moves into a window of its own, and comes back when that window closes
-  const popBtn = document.getElementById('notesPop');
-  popBtn.onclick = async () => {
-    if (popWin) return popWin.focus();
-    const w = notesFrame.offsetWidth, h = notesFrame.offsetHeight;
-    let win = null;
-    try {
-      win = window.documentPictureInPicture
-        ? await documentPictureInPicture.requestWindow({ width: w, height: h })
-        : open('', 'rach-viz-notes', `popup,width=${w},height=${h}`);
-    } catch {}
-    if (!win) return flashLabel(popBtn, 'Blocked');
-    const d = win.document;
-    d.title = 'Notes';
-    for (const el of document.querySelectorAll('style, link[rel=stylesheet]')) d.head.appendChild(el.cloneNode(true));
-    d.body.className = 'popped';
-    d.body.appendChild(nview);
-    popWin = win;
-    notesFrame.hidden = true;
-    win.addEventListener('pagehide', () => {
-      if (popWin !== win) return;
-      popWin = null;
-      notesFrame.appendChild(nview);
-      notesFrame.hidden = !notesUi.on;
-      if (notesUi.on) placeNotes();
-    });
-  };
-  addEventListener('pagehide', () => popWin?.close());
+  notesSettingsChanged();
   if (notesUi.on) setNotes(true);
 
   // Keep the screen awake while playing
