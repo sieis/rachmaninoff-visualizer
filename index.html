@@ -585,22 +585,49 @@
     }
   }
   const spriteCol = hue => Math.round(((hue % 360) + 360) % 360 * HUES / 360) % HUES;
-  // Flame particles: soft puffs that cool from white-yellow to deep red, a column per stage of age.
+  // The colours of fire by heat, shared by the Fire strip and flame particles
+  const FIRE_PAL = new Uint8ClampedArray(256 * 4);
+  {
+    const stops = [[0, 0, 0, 0], [0.15, 90, 8, 0], [0.35, 200, 40, 0], [0.55, 255, 120, 10], [0.75, 255, 200, 60], [1, 255, 250, 220]];
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255, j = stops.findIndex(s => s[0] >= t), a = stops[Math.max(0, j - 1)], z = stops[j];
+      const f = z[0] === a[0] ? 1 : (t - a[0]) / (z[0] - a[0]);
+      for (let c = 1; c < 4; c++) FIRE_PAL[i * 4 + c - 1] = a[c] + (z[c] - a[c]) * f;
+      FIRE_PAL[i * 4 + 3] = Math.min(255, t * 3 * 255);
+    }
+  }
+  // Flame particles: small tongues of fire in the Fire strip's own colours, round at the base and
+  // drawn up to a point, a column per stage of age as they cool from white-hot to deep red.
   // Water particles: pale droplets with a bright highlight, a column per brightness.
-  const FLAME_STEPS = 16, DROP_TONES = 4;
+  const FLAME_STEPS = 16, DROP_TONES = 4, FW = 32, FH = 48;
   const flameSprites = document.createElement('canvas'), dropSprites = document.createElement('canvas');
   {
-    flameSprites.width = FLAME_STEPS * CELL; flameSprites.height = CELL;
+    flameSprites.width = FLAME_STEPS * FW; flameSprites.height = FH;
     let sc = flameSprites.getContext('2d');
+    const img = sc.createImageData(FLAME_STEPS * FW, FH), d = img.data, R = FW / 2 - 1;
     for (let i = 0; i < FLAME_STEPS; i++) {
-      const t = i / (FLAME_STEPS - 1), cx = (i + 0.5) * CELL, c = CELL / 2;
-      const h = 52 - 50 * t, l = 88 - 55 * t ** 0.8;
-      const g = sc.createRadialGradient(cx, c, 0, cx, c, c);
-      g.addColorStop(0, `hsla(${h + 6}, 100%, ${Math.min(96, l + 10)}%, 1)`);
-      g.addColorStop(0.35, `hsla(${h}, 100%, ${l}%, 0.6)`);
-      g.addColorStop(1, `hsla(${h - 8}, 100%, ${l * 0.6}%, 0)`);
-      sc.fillStyle = g; sc.fillRect(i * CELL, 0, CELL, CELL);
+      const heat = 1.35 * (1 - 0.75 * i / (FLAME_STEPS - 1)); // it cools as it ages
+      for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
+        // Distance in a teardrop: full width at the base, narrowing to a tip at the top
+        const v = (y - FH * 0.66) / R, up = Math.max(0, -v) / 1.9, u = (x - FW / 2 + 0.5) / (R * Math.max(0.08, 1 - up));
+        const dist = Math.hypot(u, v < 0 ? up : v);
+        const h = Math.max(0, 1 - dist) ** 0.9 * heat * (0.92 + 0.16 * Math.random());
+        const k = Math.min(255, h * 255 | 0) * 4, o = (y * FLAME_STEPS * FW + i * FW + x) * 4;
+        d[o] = FIRE_PAL[k]; d[o + 1] = FIRE_PAL[k + 1]; d[o + 2] = FIRE_PAL[k + 2]; d[o + 3] = FIRE_PAL[k + 3];
+      }
     }
+    sc.putImageData(img, 0, 0);
+    // Softened like the strip's flames, each tongue blurred within its own cell
+    const raw = document.createElement('canvas');
+    raw.width = flameSprites.width; raw.height = FH;
+    raw.getContext('2d').drawImage(flameSprites, 0, 0);
+    sc.clearRect(0, 0, flameSprites.width, FH);
+    sc.filter = 'blur(1.5px)';
+    for (let i = 0; i < FLAME_STEPS; i++) {
+      sc.save(); sc.beginPath(); sc.rect(i * FW, 0, FW, FH); sc.clip();
+      sc.drawImage(raw, 0, 0); sc.restore();
+    }
+    sc.filter = 'none';
     dropSprites.width = DROP_TONES * CELL; dropSprites.height = CELL;
     sc = dropSprites.getContext('2d');
     for (let i = 0; i < DROP_TONES; i++) {
@@ -670,7 +697,7 @@
 
   function spawn(x, y, vx, vy, life, size, hue) {
     if (particles.length < MAX_PARTICLES) {
-      const t = S.ptype;
+      const t = S.stype === 2 ? 1 : S.ptype; // the Fire strip turns every particle to flame
       life *= S.plife * (t === 2 ? 1.4 : 1);
       if (t === 2 && vy < 0) vy *= 1.5; // droplets are thrown higher, since they fall back
       particles.push({ x, y, vx, vy, life, max: life, size: size * S.psize, col: spriteCol(hue), t });
@@ -1940,16 +1967,7 @@
   // Fire: heat rises from a bed along the keys one row at a time, cooling at random and drifting
   // a cell left or right as it goes, which breaks it into tongues. Played keys stoke the bed under
   // them, so their flames leap higher. Height sets how tall a calm flame stands.
-  const FIRE_CELL = 3, FIRE_PAL = new Uint8ClampedArray(256 * 4);
-  {
-    const stops = [[0, 0, 0, 0], [0.15, 90, 8, 0], [0.35, 200, 40, 0], [0.55, 255, 120, 10], [0.75, 255, 200, 60], [1, 255, 250, 220]];
-    for (let i = 0; i < 256; i++) {
-      const t = i / 255, j = stops.findIndex(s => s[0] >= t), a = stops[Math.max(0, j - 1)], z = stops[j];
-      const f = z[0] === a[0] ? 1 : (t - a[0]) / (z[0] - a[0]);
-      for (let c = 1; c < 4; c++) FIRE_PAL[i * 4 + c - 1] = a[c] + (z[c] - a[c]) * f;
-      FIRE_PAL[i * 4 + 3] = Math.min(255, t * 3 * 255);
-    }
-  }
+  const FIRE_CELL = 3;
   let fire = null, fireAcc = 0;
   function drawFire(dt, now, keyTop, ww) {
     const rows = (12 + 110 * S.sheight) / FIRE_CELL;
@@ -2196,9 +2214,9 @@
         p.vx *= Math.pow(0.3, dt);
         p.vy = p.vy * Math.pow(0.5, dt) - 150 * S.pspeed * dt;
         p.x += p.vx * dt; p.y += p.vy * dt;
-        const r = p.size * (0.55 + 0.45 * a + 1.4 * a * (1 - a)), d = r * 2.6 * CELL / DOT;
-        ctx.globalAlpha = Math.min(1, a * 1.6) * (0.75 + Math.random() * 0.25);
-        ctx.drawImage(flameSprites, Math.min(FLAME_STEPS - 1, (1 - a) * FLAME_STEPS | 0) * CELL, 0, CELL, CELL, p.x - d / 2, p.y - d / 2, d, d);
+        const r = p.size * (0.55 + 0.45 * a + 1.4 * a * (1 - a)), d = r * 4.6, dh = d * FH / FW * (1 + Math.min(0.6, Math.abs(p.vy) / 400));
+        ctx.globalAlpha = Math.min(1, a * 1.6);
+        ctx.drawImage(flameSprites, Math.min(FLAME_STEPS - 1, (1 - a) * FLAME_STEPS | 0) * FW, 0, FW, FH, p.x - d / 2, p.y - dh * 0.66, d, dh);
         continue;
       }
       if (p.t === 2) { // Water: thrown up, it falls back under gravity and is gone once it reaches the keys
