@@ -229,12 +229,20 @@
       { key: 'cmode',     label: 'Color by',        min: 0,    max: 2,   step: 1,    def: 0, names: ['Pitch', 'Pitch class', 'Velocity'], when: () => uses(1, 2, 3) },
       { key: 'keys',      label: 'Keyboard height', min: 0,    max: 0.3, step: 0.005, def: 0.16 },
     ] },
+    // The strip along the top of the keys: plain felt, a band of LEDs, a bed of fire, or a
+    // channel of water. Played keys light the LEDs above them, stoke the fire, and ripple the water.
+    { title: 'Strip', controls: [
+      { key: 'stype',     label: 'Kind',            min: 0,    max: 3,   step: 1,    def: 0, choice: true, names: ['Felt', 'LED', 'Fire', 'Water'] },
+      { key: 'sbright',   label: 'Brightness',      min: 0,    max: 1,   step: 0.01, def: 0.6,  when: () => S.stype > 0 },
+      { key: 'sheight',   label: 'Height',          min: 0,    max: 1,   step: 0.01, def: 0.4,  when: () => S.stype > 1 },
+    ] },
     // Pitches heard by the microphone play the visualizer like keys
     { title: 'Microphone', controls: [
       { key: 'mdetect',   label: 'Listen for',      min: 0,    max: 1,   step: 1,    def: 1, names: ['One note', 'Chords'] },
       { key: 'msens',     label: 'Sensitivity',     min: 0,    max: 1,   step: 0.01, def: 0.5 },
     ] },
     { title: 'Particles', controls: [
+      { key: 'ptype',     label: 'Type',            min: 0,    max: 2,   step: 1,    def: 0, choice: true, names: ['Standard', 'Flame', 'Water'] },
       { key: 'particles', label: 'Amount',          min: 0,    max: 1,   step: 0.01, def: 0.4 },
       { key: 'pspeed',    label: 'Speed',           min: 0.2,  max: 3,   step: 0.01, def: 1 },
       { key: 'pspread',   label: 'Spread',          min: 0,    max: 3,   step: 0.01, def: 1 },
@@ -365,7 +373,7 @@
     }
   }
   // Short sections share a column
-  for (const titles of [['Keyboard'], ['Microphone', 'Particles', 'Weather', 'Windows'], ['Geometry', 'Click'], ['Reaction', 'Image', 'Presets']]) {
+  for (const titles of [['Keyboard'], ['Microphone', 'Particles', 'Weather', 'Windows'], ['Geometry', 'Strip', 'Click'], ['Reaction', 'Image', 'Presets']]) {
     const col = document.createElement('div');
     rows.appendChild(col);
     col.append(...titles.map(t => sections[t]));
@@ -577,6 +585,32 @@
     }
   }
   const spriteCol = hue => Math.round(((hue % 360) + 360) % 360 * HUES / 360) % HUES;
+  // Flame particles: soft puffs that cool from white-yellow to deep red, a column per stage of age.
+  // Water particles: pale droplets with a bright highlight, a column per brightness.
+  const FLAME_STEPS = 16, DROP_TONES = 4;
+  const flameSprites = document.createElement('canvas'), dropSprites = document.createElement('canvas');
+  {
+    flameSprites.width = FLAME_STEPS * CELL; flameSprites.height = CELL;
+    let sc = flameSprites.getContext('2d');
+    for (let i = 0; i < FLAME_STEPS; i++) {
+      const t = i / (FLAME_STEPS - 1), cx = (i + 0.5) * CELL, c = CELL / 2;
+      const h = 52 - 50 * t, l = 88 - 55 * t ** 0.8;
+      const g = sc.createRadialGradient(cx, c, 0, cx, c, c);
+      g.addColorStop(0, `hsla(${h + 6}, 100%, ${Math.min(96, l + 10)}%, 1)`);
+      g.addColorStop(0.35, `hsla(${h}, 100%, ${l}%, 0.6)`);
+      g.addColorStop(1, `hsla(${h - 8}, 100%, ${l * 0.6}%, 0)`);
+      sc.fillStyle = g; sc.fillRect(i * CELL, 0, CELL, CELL);
+    }
+    dropSprites.width = DROP_TONES * CELL; dropSprites.height = CELL;
+    sc = dropSprites.getContext('2d');
+    for (let i = 0; i < DROP_TONES; i++) {
+      const cx = (i + 0.5) * CELL, c = CELL / 2, l = 55 + 30 * (i + 0.5) / DROP_TONES;
+      sc.fillStyle = `hsla(198, 90%, ${l}%, 0.85)`;
+      sc.beginPath(); sc.arc(cx, c, DOT, 0, Math.PI * 2); sc.fill();
+      sc.fillStyle = `hsla(190, 100%, 96%, 0.9)`;
+      sc.beginPath(); sc.arc(cx - DOT * 0.35, c - DOT * 0.35, DOT * 0.35, 0, Math.PI * 2); sc.fill();
+    }
+  }
 
   // ---------- Note state ----------
   const held = new Map();   // note -> bar
@@ -621,6 +655,7 @@
     }
     if (mode === 3) strike(bar);
     burst(n, vel, Math.round(amount() * 0.5 * (0.4 + vel)));
+    if (S.stype === 3) ripple(n, vel);
     notesChanged(n, true);
   }
   function noteOff(n, mic = false) {
@@ -635,8 +670,10 @@
 
   function spawn(x, y, vx, vy, life, size, hue) {
     if (particles.length < MAX_PARTICLES) {
-      life *= S.plife;
-      particles.push({ x, y, vx, vy, life, max: life, size: size * S.psize, col: spriteCol(hue) });
+      const t = S.ptype;
+      life *= S.plife * (t === 2 ? 1.4 : 1);
+      if (t === 2 && vy < 0) vy *= 1.5; // droplets are thrown higher, since they fall back
+      particles.push({ x, y, vx, vy, life, max: life, size: size * S.psize, col: spriteCol(hue), t });
     }
   }
 
@@ -1834,6 +1871,201 @@
     ctx.restore();
   }
 
+  // ---------- Strip: LED band, fire, or water along the top of the keys ----------
+  // How lit each key is right now: held, or fading out after a strike
+  const keyAct = n => Math.max(downBar[n] ? 0.5 + 0.3 * downBar[n].vel : 0, flash[n]);
+  const active = [];
+  function gatherActive() {
+    active.length = 0;
+    for (let n = LOW; n <= HIGH; n++) { const a = keyAct(n); if (a > 0.02) active.push(n, a); }
+  }
+  const whiteNotes = [];
+  for (let n = LOW; n <= HIGH; n++) if (!keyGeo[n].black) whiteNotes.push(n);
+  function noteUnder(u) { // u in white-key widths
+    const n = whiteNotes[Math.max(0, Math.min(WHITES - 1, Math.floor(u)))];
+    for (const m of [n - 1, n + 1]) { const g = keyGeo[m]; if (g && g.black && u >= g.x && u < g.x + g.w) return m; }
+    return n;
+  }
+
+  // LED: a dark housing of small lamps, each in the colour of the key below it. Brightness sets how
+  // bright they burn at rest; the lamps over a played key flare up and bloom.
+  function drawLeds(keyTop, ww) {
+    const b = S.sbright, hgt = Math.max(4, Math.min(9, ww * 0.26)), pitch = Math.max(5, hgt * 1.15);
+    const count = Math.floor(W / pitch), step = W / count, cy = keyTop - hgt / 2;
+    gatherActive();
+    ctx.fillStyle = '#06070b';
+    ctx.fillRect(0, keyTop - hgt - 1, W, hgt + 1);
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < count; i++) {
+      const x = (i + 0.5) * step, u = x / ww;
+      let boost = 0;
+      for (let k = 0; k < active.length; k += 2) {
+        const g = keyGeo[active[k]], d = Math.abs(g.x + g.w / 2 - u);
+        if (d < 1.3) boost = Math.max(boost, active[k + 1] * (1 - d / 1.3));
+      }
+      const lvl = b * 0.8 + boost * 1.2, hue = Math.round(hueOf(noteUnder(u)));
+      if (lvl > 0.01) {
+        ctx.fillStyle = gradient('led:' + hue, () => {
+          const rg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+          rg.addColorStop(0, `hsla(${hue}, 100%, 70%, 0.9)`);
+          rg.addColorStop(0.25, `hsla(${hue}, 100%, 55%, 0.3)`);
+          rg.addColorStop(1, 'hsla(0,0%,0%,0)');
+          return rg;
+        });
+        const rad = pitch * (1 + 2.2 * Math.min(1.5, lvl) * (0.4 + S.glow));
+        ctx.globalAlpha = Math.min(1, lvl * 0.6);
+        ctx.setTransform(DPR * rad, 0, 0, DPR * rad * 0.8, DPR * x, DPR * cy);
+        ctx.fillRect(-1, -1, 2, 2);
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = `hsl(${hue}, 100%, ${12 + 70 * Math.min(1, lvl)}%)`;
+      ctx.fillRect(x - pitch * 0.3, cy - hgt * 0.28, pitch * 0.6, hgt * 0.56);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // Fire: heat rises from a bed along the keys one row at a time, cooling at random and drifting
+  // a cell left or right as it goes, which breaks it into tongues. Played keys stoke the bed under
+  // them, so their flames leap higher. Height sets how tall a calm flame stands.
+  const FIRE_CELL = 3, FIRE_PAL = new Uint8ClampedArray(256 * 4);
+  {
+    const stops = [[0, 0, 0, 0], [0.15, 90, 8, 0], [0.35, 200, 40, 0], [0.55, 255, 120, 10], [0.75, 255, 200, 60], [1, 255, 250, 220]];
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255, j = stops.findIndex(s => s[0] >= t), a = stops[Math.max(0, j - 1)], z = stops[j];
+      const f = z[0] === a[0] ? 1 : (t - a[0]) / (z[0] - a[0]);
+      for (let c = 1; c < 4; c++) FIRE_PAL[i * 4 + c - 1] = a[c] + (z[c] - a[c]) * f;
+      FIRE_PAL[i * 4 + 3] = Math.min(255, t * 3 * 255);
+    }
+  }
+  let fire = null, fireAcc = 0;
+  function drawFire(dt, now, keyTop, ww) {
+    const rows = (12 + 110 * S.sheight) / FIRE_CELL;
+    const fw = Math.ceil(W / FIRE_CELL) + 2, fh = Math.ceil(rows * 2.8) + 2;
+    if (!fire || fire.fw !== fw || fire.fh !== fh) {
+      const [c, g, m] = [0, 0, 0].map(() => document.createElement('canvas'));
+      c.width = g.width = m.width = fw; c.height = g.height = m.height = fh;
+      const cx = c.getContext('2d');
+      fire = { fw, fh, heat: new Float32Array(fw * fh), boost: new Float32Array(fw), c, cx, g, gx: g.getContext('2d'), m, mx: m.getContext('2d'), img: cx.createImageData(fw, fh) };
+    }
+    const { heat, boost } = fire, decay = 1.8 / rows, bed = (fh - 1) * fw;
+    gatherActive();
+    fireAcc = Math.min(fireAcc + dt, 0.05);
+    while (fireAcc >= 1 / 60) {
+      fireAcc -= 1 / 60;
+      boost.fill(0);
+      for (let k = 0; k < active.length; k += 2) {
+        const g = keyGeo[active[k]], c0 = Math.max(0, Math.floor(g.x * ww / FIRE_CELL)), c1 = Math.min(fw, Math.ceil((g.x + g.w) * ww / FIRE_CELL) + 1);
+        for (let x = c0; x < c1; x++) boost[x] = Math.max(boost[x], active[k + 1]);
+      }
+      const t = performance.now();
+      for (let x = 0; x < fw; x++)
+        heat[bed + x] = 0.9 * (0.72 + 0.28 * Math.sin(x * 0.21 + t * 0.004) * Math.sin(x * 0.067 - t * 0.0023)) + Math.random() * 0.15 + 1.6 * boost[x];
+      for (let y = 1; y < fh; y++) for (let x = 0; x < fw; x++) {
+        const src = y * fw + x, dx = x + (Math.random() * 3 | 0) - 1;
+        if (dx >= 0 && dx < fw) heat[src - fw + dx - x] = Math.max(0, heat[src] - Math.random() * decay);
+      }
+    }
+    const data = fire.img.data;
+    for (let i = 0; i < fw * fh; i++) {
+      const h = Math.min(255, heat[i] * 255 | 0) * 4, o = i * 4;
+      data[o] = FIRE_PAL[h]; data[o + 1] = FIRE_PAL[h + 1]; data[o + 2] = FIRE_PAL[h + 2]; data[o + 3] = FIRE_PAL[h + 3];
+    }
+    fire.cx.putImageData(fire.img, 0, 0);
+    const y = keyTop - (fh - 1) * FIRE_CELL, w = fw * FIRE_CELL, h = fh * FIRE_CELL;
+    ctx.globalCompositeOperation = 'lighter';
+    // Softened a little so single cells don't show, and bloomed; both blurred while the fire is still small
+    let main = fire.c;
+    if (fastGlow) {
+      fire.mx.clearRect(0, 0, fw, fh);
+      fire.mx.filter = 'blur(1.3px)'; fire.mx.drawImage(fire.c, 0, 0); fire.mx.filter = 'none';
+      main = fire.m;
+      if (S.glow > 0) {
+        fire.gx.clearRect(0, 0, fw, fh);
+        fire.gx.filter = 'blur(3px)'; fire.gx.drawImage(fire.c, 0, 0); fire.gx.filter = 'none';
+        ctx.globalAlpha = (0.3 + 0.7 * S.sbright) * S.glow * 0.9;
+        ctx.drawImage(fire.g, -FIRE_CELL, y, w, h);
+      }
+    }
+    ctx.globalAlpha = 0.35 + 0.65 * S.sbright;
+    ctx.drawImage(main, -FIRE_CELL, y, w, h);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // Water: a channel along the keys whose surface rolls gently on its own. A strike pushes the
+  // water down over its key and the ripple runs out both ways; played keys light it from below.
+  // Height sets how deep the water is.
+  const WCELL = 4;
+  let water = null, waterAcc = 0;
+  function ripple(n, vel) {
+    if (!water) return;
+    const g = keyGeo[n], ww = W / WHITES, c = (g.x + g.w / 2) * ww / WCELL, sig = Math.max(2, g.w * ww / WCELL * 0.7);
+    const amp = (3 + 10 * vel) * (0.5 + S.sheight);
+    for (let i = Math.max(0, Math.floor(c - 3 * sig)); i < Math.min(water.n, Math.ceil(c + 3 * sig)); i++)
+      water.h[i] -= amp * Math.exp(-(((i - c) / sig) ** 2));
+  }
+  function drawWater(dt, now, keyTop, ww) {
+    const n = Math.ceil(W / WCELL) + 2;
+    if (!water || water.n !== n) water = { n, h: new Float32Array(n), p: new Float32Array(n) };
+    const depth = 5 + 45 * S.sheight, b = S.sbright;
+    waterAcc = Math.min(waterAcc + dt, 0.05);
+    while (waterAcc >= 1 / 120) {
+      waterAcc -= 1 / 120;
+      const { h, p } = water;
+      for (let i = 0; i < n; i++) {
+        const l = h[i > 0 ? i - 1 : 0], r = h[i < n - 1 ? i + 1 : n - 1];
+        p[i] = (2 * h[i] - p[i] + 0.3 * (l - 2 * h[i] + r)) * 0.996 - h[i] * 0.002;
+      }
+      water.h = p; water.p = h;
+    }
+    const lim = depth * 0.9, t = now / 1000, swell = 0.8 + 1.8 * S.sheight;
+    const surf = i => keyTop - depth - Math.max(-lim, Math.min(lim, water.h[i]))
+      - swell * (Math.sin(i * 0.09 + t * 1.3) + 0.6 * Math.sin(i * 0.23 - t * 2.1) + 0.3 * Math.sin(i * 0.47 + t * 3.3));
+    const path = new Path2D();
+    path.moveTo(-WCELL, keyTop);
+    for (let i = 0; i < n; i++) path.lineTo((i - 1) * WCELL, surf(i));
+    path.lineTo(W + WCELL, keyTop); path.closePath();
+    const top = keyTop - depth * 1.5;
+    ctx.fillStyle = gradient(`water:${top | 0}:${keyTop | 0}`, () => {
+      const g = ctx.createLinearGradient(0, top, 0, keyTop);
+      g.addColorStop(0, 'hsla(188, 85%, 62%, 0.55)');
+      g.addColorStop(1, 'hsla(214, 90%, 22%, 0.85)');
+      return g;
+    });
+    ctx.globalAlpha = 0.45 + 0.55 * b;
+    ctx.fill(path);
+    // Played keys glow up through the water in their own colour
+    gatherActive();
+    ctx.save(); ctx.clip(path);
+    ctx.globalCompositeOperation = 'lighter';
+    for (let k = 0; k < active.length; k += 2) {
+      const m = active[k], g = keyGeo[m], hue = Math.round(hueOf(m));
+      ctx.fillStyle = gradient('note:' + hue, () => {
+        const rg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+        rg.addColorStop(0, `hsla(${hue}, 100%, 78%, 1)`);
+        rg.addColorStop(0.3, `hsla(${hue}, 100%, 60%, 0.35)`);
+        rg.addColorStop(1, 'hsla(0,0%,0%,0)');
+        return rg;
+      });
+      const rad = ww * 2.5 + depth;
+      ctx.globalAlpha = Math.min(1, active[k + 1] * (0.4 + 0.6 * b));
+      ctx.setTransform(DPR * rad, 0, 0, DPR * (depth + 10), DPR * (g.x + g.w / 2) * ww, DPR * keyTop);
+      ctx.fillRect(-1, -1, 2, 1);
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    ctx.restore();
+    // The surface catches the light
+    const line = new Path2D();
+    for (let i = 0; i < n; i++) line[i ? 'lineTo' : 'moveTo']((i - 1) * WCELL, surf(i));
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'hsl(186, 100%, 80%)';
+    ctx.globalAlpha = 0.12 * (0.3 + b) * (0.4 + S.glow); ctx.lineWidth = 7; ctx.stroke(line);
+    ctx.globalAlpha = 0.35 + 0.6 * b; ctx.lineWidth = 1.5; ctx.stroke(line);
+    ctx.globalAlpha = 1; ctx.lineWidth = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
   // ---------- Render ----------
   const cores = []; // bar cores waiting to be drawn this frame, eight values each
   const barPath = (off, x, y, w, h, r) => { off ? wavyRect(bctx, x, y, w, h, r, off) : bctx.roundRect(x, y, w, h, r); };
@@ -2007,10 +2239,31 @@
       const p = particles[i];
       p.life -= dt;
       if (p.life <= 0) { particles[i] = particles[particles.length - 1]; particles.pop(); continue; }
+      const a = p.life / p.max;
+      if (p.t === 1) { // Flame: buoyant, it rises on its own and flickers side to side as it cools
+        p.vx += (Math.random() - 0.5) * 320 * S.pspread * S.pspeed * dt;
+        p.vx *= Math.pow(0.3, dt);
+        p.vy = p.vy * Math.pow(0.5, dt) - 150 * S.pspeed * dt;
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        const r = p.size * (0.55 + 0.45 * a + 1.4 * a * (1 - a)), d = r * 2.6 * CELL / DOT;
+        ctx.globalAlpha = Math.min(1, a * 1.6) * (0.75 + Math.random() * 0.25);
+        ctx.drawImage(flameSprites, Math.min(FLAME_STEPS - 1, (1 - a) * FLAME_STEPS | 0) * CELL, 0, CELL, CELL, p.x - d / 2, p.y - d / 2, d, d);
+        continue;
+      }
+      if (p.t === 2) { // Water: thrown up, it falls back under gravity and is gone once it reaches the keys
+        p.vx += (Math.random() - 0.5) * 60 * S.pspread * S.pspeed * dt;
+        p.vx *= Math.pow(0.6, dt);
+        p.vy += 650 * S.pspeed * dt;
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        if (p.vy > 0 && p.y > keyTop) { particles[i] = particles[particles.length - 1]; particles.pop(); continue; }
+        const d = p.size * 1.15 * CELL / DOT, dh = d * (1 + Math.min(1.6, Math.abs(p.vy) / 450));
+        ctx.globalAlpha = Math.min(1, a * 3) * 0.85;
+        ctx.drawImage(dropSprites, Math.min(DROP_TONES - 1, a * DROP_TONES | 0) * CELL, 0, CELL, CELL, p.x - d / 2, p.y - dh / 2, d, dh);
+        continue;
+      }
       p.vx += (Math.random() - 0.5) * 240 * S.pspread * S.pspeed * dt;
       p.vy *= Math.pow(0.35, dt);
       p.x += p.vx * dt; p.y += p.vy * dt;
-      const a = p.life / p.max;
       const r = p.size * (0.4 + a * 0.6);
       // The smallest used to be squares; a slightly wider dot covers the same area
       const d = r * (r > 1.1 ? 1 : 1.128) * CELL / DOT;
@@ -2067,17 +2320,22 @@
       lightKeys(true);
       ctx.restore();
       // Felt strip
-      ctx.fillStyle = gradient(`strip:${S.hue}:${S.spread}:${W}`, () => {
-        const strip = ctx.createLinearGradient(0, 0, W, 0);
-        strip.addColorStop(0, `hsl(${S.hue}, 90%, 55%)`);
-        strip.addColorStop(1, `hsl(${S.hue + S.spread}, 90%, 55%)`);
-        return strip;
-      });
-      ctx.shadowColor = `hsl(${S.hue + S.spread / 2}, 100%, 60%)`;
-      ctx.shadowBlur = 12 * S.glow * DPR;
-      ctx.fillRect(0, keyTop - 2, W, 2);
-      ctx.shadowBlur = 0;
+      if (S.stype === 0) {
+        ctx.fillStyle = gradient(`strip:${S.hue}:${S.spread}:${W}`, () => {
+          const strip = ctx.createLinearGradient(0, 0, W, 0);
+          strip.addColorStop(0, `hsl(${S.hue}, 90%, 55%)`);
+          strip.addColorStop(1, `hsl(${S.hue + S.spread}, 90%, 55%)`);
+          return strip;
+        });
+        ctx.shadowColor = `hsl(${S.hue + S.spread / 2}, 100%, 60%)`;
+        ctx.shadowBlur = 12 * S.glow * DPR;
+        ctx.fillRect(0, keyTop - 2, W, 2);
+        ctx.shadowBlur = 0;
+      }
     }
+    if (S.stype === 1) drawLeds(keyTop, ww);
+    else if (S.stype === 2) drawFire(dt, now, keyTop, ww);
+    else if (S.stype === 3) drawWater(dt, now, keyTop, ww);
 
     // While Hue or Color spread is being dragged, the strip grows into a tall band: one slice per
     // key in the colour that key plays (or soft to loud, left to right, when colouring by velocity)
