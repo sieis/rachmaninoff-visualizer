@@ -608,7 +608,9 @@
     if (n < LOW || n > HIGH) return;
     mic = !!mic;
     if (held.has(n + mic * 128)) noteOff(n, mic);
-    const bar = { note: n, vel, start: performance.now(), end: null, mic };
+    // jh, ja, js: a little of this note's own in its dissolve height, smoke amount, and spread
+    const bar = { note: n, vel, start: performance.now(), end: null, mic,
+      jh: Math.random() * 2 - 1, ja: Math.random() * 2 - 1, js: Math.random() * 2 - 1 };
     held.set(n + mic * 128, bar); bars.push(bar);
     flash[n] = 1; lastVel[n] = vel; keyMic[n] = mic;
     feed(bar);
@@ -1669,10 +1671,10 @@
     }
   }
   const smoke = []; // { x, y, vx, vy, life, max, r, col, seed, rot, spin }
-  function puff(x, y, vy, w, hue) {
+  function puff(x, y, vy, w, hue, sp) {
     if (smoke.length >= MAX_SMOKE) return;
-    const life = (1.6 + Math.random() * 1.8) * (0.6 + 0.8 * S.sspread);
-    smoke.push({ x, y, vx: (Math.random() - 0.5) * 60 * S.sspread, vy, life, max: life,
+    const life = (1.6 + Math.random() * 1.8) * (0.6 + 0.8 * sp);
+    smoke.push({ x, y, vx: (Math.random() - 0.5) * 60 * sp, vy, life, max: life, sp,
       r: Math.max(4, w * (0.35 + Math.random() * 0.35)),
       col: Math.round((((hue % 360) + 360) % 360) * SMOKE_HUES / 360) % SMOKE_HUES,
       seed: Math.random() * TAU, rot: (Math.random() - 0.5) * 0.6, spin: (Math.random() - 0.5) * 1.4 });
@@ -1684,12 +1686,12 @@
       if (p.life <= 0) { smoke[i] = smoke[smoke.length - 1]; smoke.pop(); continue; }
       // It slows from the bar's climb to a lazy drift upward, and curls side to side
       p.vy += (-35 - p.vy) * (1 - Math.exp(-dt * 1.6));
-      p.vx += Math.sin(now * 0.0013 + p.seed + p.y * 0.012) * 100 * (0.15 + S.sspread) * dt;
+      p.vx += Math.sin(now * 0.0013 + p.seed + p.y * 0.012) * 100 * (0.15 + p.sp) * dt;
       p.vx *= Math.pow(0.5, dt);
       p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.spin * dt;
       const a = p.life / p.max, age = p.max - p.life;
       const alpha = Math.min(1, age / 0.2) * a * a * 0.5;
-      const grow = 1 + 2.6 * (0.4 + 1.2 * S.sspread) * (1 - a), rx = p.r * 0.55 * grow, ry = p.r * 1.5 * grow;
+      const grow = 1 + 2.6 * (0.4 + 1.2 * p.sp) * (1 - a), rx = p.r * 0.55 * grow, ry = p.r * 1.5 * grow;
       const cs = Math.cos(p.rot), sn = Math.sin(p.rot);
       ctx.globalAlpha = alpha;
       ctx.setTransform(DPR * cs * rx, DPR * sn * rx, -DPR * sn * ry, DPR * cs * ry, DPR * p.x, DPR * p.y);
@@ -1833,7 +1835,7 @@
   }
 
   // ---------- Render ----------
-  const cores = []; // bar cores waiting to be drawn this frame, seven values each
+  const cores = []; // bar cores waiting to be drawn this frame, eight values each
   const barPath = (off, x, y, w, h, r) => { off ? wavyRect(bctx, x, y, w, h, r, off) : bctx.roundRect(x, y, w, h, r); };
   let last = performance.now();
   function frame(now) {
@@ -1844,9 +1846,8 @@
     const ww = W / WHITES;
     const kh = H * S.keys, keyTop = H - kh;
     const pps = S.speed * H; // pixels per second
-    // Dissolve: bars fade out over dZone above dLine, and none of them reaches the top
-    const dOn = S.dissolve === 1 && uses(1);
-    const dLine = keyTop * (1 - S.dheight), dZone = Math.max(30, keyTop * 0.12), dGone = dLine - dZone;
+    // Dissolve: each bar fades out over dZone above its own line, near Dissolve height
+    const dOn = S.dissolve === 1 && uses(1), dZone = Math.max(30, keyTop * 0.12);
 
     // Background
     ctx.fillStyle = gradient(`bg:${keyTop}:${S.hue + S.spread / 2}`, () => {
@@ -1882,9 +1883,11 @@
       const b = bars[i], g = keyGeo[b.note];
       // Bars are only drawn in the Note visualizer. Elsewhere a bar lasts as long as its key is down.
       if (modeOf(b) !== 1) { if (b.end != null) bars.splice(i, 1); continue; }
-      const yTop = keyTop - (now - b.start) / 1000 * pps;
+      let yTop = keyTop - (now - b.start) / 1000 * pps;
       const yBot = b.end == null ? keyTop : keyTop - (now - b.end) / 1000 * pps;
+      const dLine = keyTop * (1 - Math.min(1, Math.max(0.02, S.dheight + b.jh * 0.05))), dGone = dLine - dZone;
       if (yBot < (dOn ? dGone : -40)) { if (b.smear) b.smear.end ??= now; bars.splice(i, 1); continue; }
+      if (dOn) yTop = Math.max(yTop, dGone); // nothing of it is left past the fade
       const kw = g.w * ww, w = Math.max(2, kw * S.width * girth(b.vel));
       const x = g.x * ww + (kw - w) / 2;
       const h = Math.max(yBot - yTop, 3);
@@ -1926,11 +1929,11 @@
       if (dOn) {
         const o0 = Math.max(yTop, dGone), o1 = Math.min(yTop + h, dLine);
         if (o1 > o0) {
-          const want = 2 * S.samount * dt * Math.min(90, pps * w / 70) * (0.5 + b.vel) * (o1 - o0) / dZone;
-          const hue = hueOf(b.note, b.vel);
+          const want = 2 * S.samount * (1 + b.ja * 0.2) * dt * Math.min(90, pps * w / 70) * (0.5 + b.vel) * (o1 - o0) / dZone;
+          const hue = hueOf(b.note, b.vel), sp = Math.max(0, S.sspread * (1 + b.js * 0.2));
           for (let k = Math.floor(want + Math.random()); k > 0; k--) {
             const sy = o0 + Math.random() * (o1 - o0);
-            puff(x + Math.random() * w + (off ? off(sy) : 0), sy, -pps * (0.3 + Math.random() * 0.3), w, hue + (Math.random() - 0.5) * 20);
+            puff(x + Math.random() * w + (off ? off(sy) : 0), sy, -pps * (0.3 + Math.random() * 0.3), w, hue + (Math.random() - 0.5) * 20, sp);
           }
         }
         if (b.smear) b.smear.end ??= now;
@@ -1944,26 +1947,27 @@
       }
 
       if (!fastGlow) bctx.shadowColor = colorOf(b.note, 60, 1, b.vel);
-      bctx.fillStyle = colorOf(b.note, light, 0.92, b.vel);
+      if (dOn) { // solid up to the line, then fading out to nothing at dGone
+        const fg = bctx.createLinearGradient(0, dLine, 0, dGone);
+        fg.addColorStop(0, colorOf(b.note, light, 0.92, b.vel)); fg.addColorStop(1, colorOf(b.note, light, 0, b.vel));
+        bctx.fillStyle = fg;
+      } else bctx.fillStyle = colorOf(b.note, light, 0.92, b.vel);
       bctx.beginPath(); barPath(off, x, yTop, w, h, r); bctx.fill();
 
       // The bright core goes on after the glow, so the glow keeps the bar's colour
       const cw = w * 0.42;
-      cores.push(off, x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round, 0.16 + ve * 0.2);
+      cores.push(off, x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round, 0.16 + ve * 0.2, dOn ? dLine : NaN);
     }
     bctx.shadowBlur = 0;
     if (fastGlow && S.glow > 0 && cores.length) glowBars();
-    for (let i = 0; i < cores.length; i += 7) {
-      bctx.fillStyle = `rgba(255,255,255,${cores[i + 6]})`;
+    for (let i = 0; i < cores.length; i += 8) {
+      const a = cores[i + 6], line = cores[i + 7];
+      if (line === line) { // a dissolving bar's core fades with it
+        const fg = bctx.createLinearGradient(0, line, 0, line - dZone);
+        fg.addColorStop(0, `rgba(255,255,255,${a})`); fg.addColorStop(1, 'rgba(255,255,255,0)');
+        bctx.fillStyle = fg;
+      } else bctx.fillStyle = `rgba(255,255,255,${a})`;
       bctx.beginPath(); barPath(cores[i], cores[i + 1], cores[i + 2], cores[i + 3], cores[i + 4], cores[i + 5]); bctx.fill();
-    }
-    // Erase the bars, glow and all, from the dissolve line up
-    if (dOn) {
-      bctx.globalCompositeOperation = 'destination-out';
-      const fg = bctx.createLinearGradient(0, dLine, 0, dGone);
-      fg.addColorStop(0, 'rgba(0,0,0,0)'); fg.addColorStop(1, 'rgba(0,0,0,1)');
-      bctx.fillStyle = fg; bctx.fillRect(0, dGone, W, dZone);
-      bctx.fillStyle = '#000'; bctx.fillRect(0, 0, W, Math.max(0, dGone));
     }
     bctx.restore();
 
