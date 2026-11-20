@@ -211,6 +211,10 @@
       { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8,  when: () => uses(1, 2) },
       { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5,  when: () => uses(1) },
       { key: 'wiggle',    label: 'Wiggle',          min: 0,    max: 1,   step: 0.01, def: 0,    when: () => uses(1) },
+      // Past a line above the keyboard, bars fade out and drift off as smoke. Dissolve height
+      // puts that line a share of the way from the keyboard to the top of the screen.
+      { key: 'dissolve',  label: 'Dissolve',        min: 0,    max: 1,   step: 1,    def: 0, names: ['Off', 'On'], when: () => uses(1) },
+      { key: 'dheight',   label: 'Dissolve height', min: 0.05, max: 1,   step: 0.01, def: 0.5,  when: () => uses(1) && S.dissolve === 1 },
       { key: 'topacity',  label: 'Cloud opacity',   min: 0,    max: 1,   step: 0.01, def: 0.7,  when: () => uses(3) },
       { key: 'tbright',   label: 'Cloud brightness', min: 0,   max: 1,   step: 0.01, def: 0.6,  when: () => uses(3) },
       { key: 'tsize',     label: 'Cloud size',      min: 0.3,  max: 2,   step: 0.01, def: 1,    when: () => uses(3) },
@@ -1646,6 +1650,52 @@
     c.closePath();
   }
 
+  // ---------- Dissolve: bars past the line turn into wisps of smoke ----------
+  const SMOKE_HUES = 36, SCELL = 64, MAX_SMOKE = 1800;
+  const smokeSheet = document.createElement('canvas');
+  {
+    smokeSheet.width = SMOKE_HUES * SCELL; smokeSheet.height = SCELL;
+    const sc = smokeSheet.getContext('2d');
+    for (let i = 0; i < SMOKE_HUES; i++) {
+      const cx = i * SCELL + SCELL / 2, g = sc.createRadialGradient(cx, SCELL / 2, 0, cx, SCELL / 2, SCELL / 2);
+      const h = i * 360 / SMOKE_HUES;
+      g.addColorStop(0, `hsla(${h}, 35%, 80%, 1)`);
+      g.addColorStop(0.4, `hsla(${h}, 30%, 70%, 0.45)`);
+      g.addColorStop(1, `hsla(${h}, 25%, 60%, 0)`);
+      sc.fillStyle = g; sc.fillRect(i * SCELL, 0, SCELL, SCELL);
+    }
+  }
+  const smoke = []; // { x, y, vx, vy, life, max, r, col, seed, rot, spin }
+  function puff(x, y, vy, w, hue) {
+    if (smoke.length >= MAX_SMOKE) return;
+    const life = 1.6 + Math.random() * 1.8;
+    smoke.push({ x, y, vx: (Math.random() - 0.5) * 30, vy, life, max: life,
+      r: Math.max(4, w * (0.35 + Math.random() * 0.35)),
+      col: Math.round((((hue % 360) + 360) % 360) * SMOKE_HUES / 360) % SMOKE_HUES,
+      seed: Math.random() * TAU, rot: (Math.random() - 0.5) * 0.6, spin: (Math.random() - 0.5) * 1.4 });
+  }
+  function drawSmoke(dt, now) {
+    for (let i = smoke.length - 1; i >= 0; i--) {
+      const p = smoke[i];
+      p.life -= dt;
+      if (p.life <= 0) { smoke[i] = smoke[smoke.length - 1]; smoke.pop(); continue; }
+      // It slows from the bar's climb to a lazy drift upward, and curls side to side
+      p.vy += (-35 - p.vy) * (1 - Math.exp(-dt * 1.6));
+      p.vx += Math.sin(now * 0.0013 + p.seed + p.y * 0.012) * 50 * dt;
+      p.vx *= Math.pow(0.5, dt);
+      p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.spin * dt;
+      const a = p.life / p.max, age = p.max - p.life;
+      const alpha = Math.min(1, age / 0.2) * a * a * 0.5;
+      const grow = 1 + 2.6 * (1 - a), rx = p.r * 0.55 * grow, ry = p.r * 1.5 * grow;
+      const cs = Math.cos(p.rot), sn = Math.sin(p.rot);
+      ctx.globalAlpha = alpha;
+      ctx.setTransform(DPR * cs * rx, DPR * sn * rx, -DPR * sn * ry, DPR * cs * ry, DPR * p.x, DPR * p.y);
+      ctx.drawImage(smokeSheet, p.col * SCELL, 0, SCELL, SCELL, -1, -1, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
   // ---------- Bars flatten against the top of the screen ----------
   const smears = []; // { x, w, hue, start, end }  end is set once the bar's tail has gone through
   function drawSmears(now) {
@@ -1791,6 +1841,9 @@
     const ww = W / WHITES;
     const kh = H * S.keys, keyTop = H - kh;
     const pps = S.speed * H; // pixels per second
+    // Dissolve: bars fade out over dZone above dLine, and none of them reaches the top
+    const dOn = S.dissolve === 1 && uses(1);
+    const dLine = keyTop * (1 - S.dheight), dZone = Math.max(30, keyTop * 0.12), dGone = dLine - dZone;
 
     // Background
     ctx.fillStyle = gradient(`bg:${keyTop}:${S.hue + S.spread / 2}`, () => {
@@ -1828,7 +1881,7 @@
       if (modeOf(b) !== 1) { if (b.end != null) bars.splice(i, 1); continue; }
       const yTop = keyTop - (now - b.start) / 1000 * pps;
       const yBot = b.end == null ? keyTop : keyTop - (now - b.end) / 1000 * pps;
-      if (yBot < -40) { if (b.smear) b.smear.end ??= now; bars.splice(i, 1); continue; }
+      if (yBot < (dOn ? dGone : -40)) { if (b.smear) b.smear.end ??= now; bars.splice(i, 1); continue; }
       const kw = g.w * ww, w = Math.max(2, kw * S.width * girth(b.vel));
       const x = g.x * ww + (kw - w) / 2;
       const h = Math.max(yBot - yTop, 3);
@@ -1845,7 +1898,7 @@
 
       // Shed particles along the bar; the rate tapers with height but never reaches zero
       if (S.shed > 0) {
-        const y0 = Math.max(yTop, 0), y1 = Math.min(yTop + h, keyTop);
+        const y0 = Math.max(yTop, dOn ? dGone : 0), y1 = Math.min(yTop + h, keyTop);
         const len = y1 - y0;
         if (len > 0) {
           const rise = (keyTop - (y0 + y1) / 2) / keyTop;
@@ -1866,8 +1919,22 @@
         }
       }
 
+      // Crossing the dissolve line: the part inside the fade gives off smoke
+      if (dOn) {
+        const o0 = Math.max(yTop, dGone), o1 = Math.min(yTop + h, dLine);
+        if (o1 > o0) {
+          const want = dt * Math.min(90, pps * w / 70) * (0.5 + b.vel) * (o1 - o0) / dZone;
+          const hue = hueOf(b.note, b.vel);
+          for (let k = Math.floor(want + Math.random()); k > 0; k--) {
+            const sy = o0 + Math.random() * (o1 - o0);
+            puff(x + Math.random() * w + (off ? off(sy) : 0), sy, -pps * (0.3 + Math.random() * 0.3), w, hue + (Math.random() - 0.5) * 20);
+          }
+        }
+        if (b.smear) b.smear.end ??= now;
+      }
+
       // Reaching the top of the screen: spread a little left and right, then fade once the tail is through
-      if (yTop <= 0) {
+      if (yTop <= 0 && !dOn) {
         if (!b.smear) smears.push(b.smear = { w, hue: hueOf(b.note, b.vel) | 0, start: now, end: null });
         if (yBot > 0) b.smear.x = x + w / 2 + (off ? off(0) : 0);
         else b.smear.end ??= now;
@@ -1887,10 +1954,19 @@
       bctx.fillStyle = `rgba(255,255,255,${cores[i + 6]})`;
       bctx.beginPath(); barPath(cores[i], cores[i + 1], cores[i + 2], cores[i + 3], cores[i + 4], cores[i + 5]); bctx.fill();
     }
+    // Erase the bars, glow and all, from the dissolve line up
+    if (dOn) {
+      bctx.globalCompositeOperation = 'destination-out';
+      const fg = bctx.createLinearGradient(0, dLine, 0, dGone);
+      fg.addColorStop(0, 'rgba(0,0,0,0)'); fg.addColorStop(1, 'rgba(0,0,0,1)');
+      bctx.fillStyle = fg; bctx.fillRect(0, dGone, W, dZone);
+      bctx.fillStyle = '#000'; bctx.fillRect(0, 0, W, Math.max(0, dGone));
+    }
     bctx.restore();
 
     // Bars cover the backdrop instead of adding to it, so nothing shows through them
     ctx.drawImage(barCanvas, 0, 0, W, H);
+    if (smoke.length) drawSmoke(dt, now);
 
     // Impact glow + continuous sparks for held notes
     ctx.globalCompositeOperation = 'lighter';
