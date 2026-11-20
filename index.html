@@ -211,6 +211,13 @@
       { key: 'width',     label: 'Note width',      min: 0.2,  max: 1,   step: 0.01, def: 0.8,  when: () => uses(1, 2) },
       { key: 'round',     label: 'Roundness',       min: 0,    max: 1,   step: 0.01, def: 0.5,  when: () => uses(1) },
       { key: 'wiggle',    label: 'Wiggle',          min: 0,    max: 1,   step: 0.01, def: 0,    when: () => uses(1) },
+      // Past a line above the keyboard, bars fade out and drift off as smoke. Dissolve height
+      // puts that line a share of the way from the keyboard to the top of the screen.
+      { key: 'dissolve',  label: 'Dissolve',        min: 0,    max: 1,   step: 1,    def: 0, names: ['Off', 'On'], when: () => uses(1) },
+      { key: 'dheight',   label: 'Dissolve height', min: 0.05, max: 1,   step: 0.01, def: 0.5,  when: () => uses(1) && S.dissolve === 1 },
+      // How much smoke the bars give off, and how far it drifts, curls, and swells before it fades
+      { key: 'samount',   label: 'Smoke amount',    min: 0,    max: 1,   step: 0.01, def: 0.5,  when: () => uses(1) && S.dissolve === 1 },
+      { key: 'sspread',   label: 'Smoke spread',    min: 0,    max: 1,   step: 0.01, def: 0.5,  when: () => uses(1) && S.dissolve === 1 },
       { key: 'topacity',  label: 'Cloud opacity',   min: 0,    max: 1,   step: 0.01, def: 0.7,  when: () => uses(3) },
       { key: 'tbright',   label: 'Cloud brightness', min: 0,   max: 1,   step: 0.01, def: 0.6,  when: () => uses(3) },
       { key: 'tsize',     label: 'Cloud size',      min: 0.3,  max: 2,   step: 0.01, def: 1,    when: () => uses(3) },
@@ -601,7 +608,9 @@
     if (n < LOW || n > HIGH) return;
     mic = !!mic;
     if (held.has(n + mic * 128)) noteOff(n, mic);
-    const bar = { note: n, vel, start: performance.now(), end: null, mic };
+    // jh, ja, js: a little of this note's own in its dissolve height, smoke amount, and spread
+    const bar = { note: n, vel, start: performance.now(), end: null, mic,
+      jh: Math.random() * 2 - 1, ja: Math.random() * 2 - 1, js: Math.random() * 2 - 1 };
     held.set(n + mic * 128, bar); bars.push(bar);
     flash[n] = 1; lastVel[n] = vel; keyMic[n] = mic;
     feed(bar);
@@ -1646,6 +1655,52 @@
     c.closePath();
   }
 
+  // ---------- Dissolve: bars past the line turn into wisps of smoke ----------
+  const SMOKE_HUES = 36, SCELL = 64, MAX_SMOKE = 1800;
+  const smokeSheet = document.createElement('canvas');
+  {
+    smokeSheet.width = SMOKE_HUES * SCELL; smokeSheet.height = SCELL;
+    const sc = smokeSheet.getContext('2d');
+    for (let i = 0; i < SMOKE_HUES; i++) {
+      const cx = i * SCELL + SCELL / 2, g = sc.createRadialGradient(cx, SCELL / 2, 0, cx, SCELL / 2, SCELL / 2);
+      const h = i * 360 / SMOKE_HUES;
+      g.addColorStop(0, `hsla(${h}, 35%, 80%, 1)`);
+      g.addColorStop(0.4, `hsla(${h}, 30%, 70%, 0.45)`);
+      g.addColorStop(1, `hsla(${h}, 25%, 60%, 0)`);
+      sc.fillStyle = g; sc.fillRect(i * SCELL, 0, SCELL, SCELL);
+    }
+  }
+  const smoke = []; // { x, y, vx, vy, life, max, r, col, seed, rot, spin }
+  function puff(x, y, vy, w, hue, sp) {
+    if (smoke.length >= MAX_SMOKE) return;
+    const life = (1.6 + Math.random() * 1.8) * (0.6 + 0.8 * sp);
+    smoke.push({ x, y, vx: (Math.random() - 0.5) * 60 * sp, vy, life, max: life, sp,
+      r: Math.max(4, w * (0.35 + Math.random() * 0.35)),
+      col: Math.round((((hue % 360) + 360) % 360) * SMOKE_HUES / 360) % SMOKE_HUES,
+      seed: Math.random() * TAU, rot: (Math.random() - 0.5) * 0.6, spin: (Math.random() - 0.5) * 1.4 });
+  }
+  function drawSmoke(dt, now) {
+    for (let i = smoke.length - 1; i >= 0; i--) {
+      const p = smoke[i];
+      p.life -= dt;
+      if (p.life <= 0) { smoke[i] = smoke[smoke.length - 1]; smoke.pop(); continue; }
+      // It slows from the bar's climb to a lazy drift upward, and curls side to side
+      p.vy += (-35 - p.vy) * (1 - Math.exp(-dt * 1.6));
+      p.vx += Math.sin(now * 0.0013 + p.seed + p.y * 0.012) * 100 * (0.15 + p.sp) * dt;
+      p.vx *= Math.pow(0.5, dt);
+      p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.spin * dt;
+      const a = p.life / p.max, age = p.max - p.life;
+      const alpha = Math.min(1, age / 0.2) * a * a * 0.5;
+      const grow = 1 + 2.6 * (0.4 + 1.2 * p.sp) * (1 - a), rx = p.r * 0.55 * grow, ry = p.r * 1.5 * grow;
+      const cs = Math.cos(p.rot), sn = Math.sin(p.rot);
+      ctx.globalAlpha = alpha;
+      ctx.setTransform(DPR * cs * rx, DPR * sn * rx, -DPR * sn * ry, DPR * cs * ry, DPR * p.x, DPR * p.y);
+      ctx.drawImage(smokeSheet, p.col * SCELL, 0, SCELL, SCELL, -1, -1, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
   // ---------- Bars flatten against the top of the screen ----------
   const smears = []; // { x, w, hue, start, end }  end is set once the bar's tail has gone through
   function drawSmears(now) {
@@ -1780,7 +1835,7 @@
   }
 
   // ---------- Render ----------
-  const cores = []; // bar cores waiting to be drawn this frame, seven values each
+  const cores = []; // bar cores waiting to be drawn this frame, eight values each
   const barPath = (off, x, y, w, h, r) => { off ? wavyRect(bctx, x, y, w, h, r, off) : bctx.roundRect(x, y, w, h, r); };
   let last = performance.now();
   function frame(now) {
@@ -1791,6 +1846,8 @@
     const ww = W / WHITES;
     const kh = H * S.keys, keyTop = H - kh;
     const pps = S.speed * H; // pixels per second
+    // Dissolve: each bar fades out over dZone above its own line, near Dissolve height
+    const dOn = S.dissolve === 1 && uses(1), dZone = Math.max(30, keyTop * 0.12);
 
     // Background
     ctx.fillStyle = gradient(`bg:${keyTop}:${S.hue + S.spread / 2}`, () => {
@@ -1826,9 +1883,11 @@
       const b = bars[i], g = keyGeo[b.note];
       // Bars are only drawn in the Note visualizer. Elsewhere a bar lasts as long as its key is down.
       if (modeOf(b) !== 1) { if (b.end != null) bars.splice(i, 1); continue; }
-      const yTop = keyTop - (now - b.start) / 1000 * pps;
+      let yTop = keyTop - (now - b.start) / 1000 * pps;
       const yBot = b.end == null ? keyTop : keyTop - (now - b.end) / 1000 * pps;
-      if (yBot < -40) { if (b.smear) b.smear.end ??= now; bars.splice(i, 1); continue; }
+      const dLine = keyTop * (1 - Math.min(1, Math.max(0.02, S.dheight + b.jh * 0.05))), dGone = dLine - dZone;
+      if (yBot < (dOn ? dGone : -40)) { if (b.smear) b.smear.end ??= now; bars.splice(i, 1); continue; }
+      if (dOn) yTop = Math.max(yTop, dGone); // nothing of it is left past the fade
       const kw = g.w * ww, w = Math.max(2, kw * S.width * girth(b.vel));
       const x = g.x * ww + (kw - w) / 2;
       const h = Math.max(yBot - yTop, 3);
@@ -1845,7 +1904,7 @@
 
       // Shed particles along the bar; the rate tapers with height but never reaches zero
       if (S.shed > 0) {
-        const y0 = Math.max(yTop, 0), y1 = Math.min(yTop + h, keyTop);
+        const y0 = Math.max(yTop, dOn ? dGone : 0), y1 = Math.min(yTop + h, keyTop);
         const len = y1 - y0;
         if (len > 0) {
           const rise = (keyTop - (y0 + y1) / 2) / keyTop;
@@ -1866,31 +1925,55 @@
         }
       }
 
+      // Crossing the dissolve line: the part inside the fade gives off smoke
+      if (dOn) {
+        const o0 = Math.max(yTop, dGone), o1 = Math.min(yTop + h, dLine);
+        if (o1 > o0) {
+          const want = 2 * S.samount * (1 + b.ja * 0.2) * dt * Math.min(90, pps * w / 70) * (0.5 + b.vel) * (o1 - o0) / dZone;
+          const hue = hueOf(b.note, b.vel), sp = Math.max(0, S.sspread * (1 + b.js * 0.2));
+          for (let k = Math.floor(want + Math.random()); k > 0; k--) {
+            const sy = o0 + Math.random() * (o1 - o0);
+            puff(x + Math.random() * w + (off ? off(sy) : 0), sy, -pps * (0.3 + Math.random() * 0.3), w, hue + (Math.random() - 0.5) * 20, sp);
+          }
+        }
+        if (b.smear) b.smear.end ??= now;
+      }
+
       // Reaching the top of the screen: spread a little left and right, then fade once the tail is through
-      if (yTop <= 0) {
+      if (yTop <= 0 && !dOn) {
         if (!b.smear) smears.push(b.smear = { w, hue: hueOf(b.note, b.vel) | 0, start: now, end: null });
         if (yBot > 0) b.smear.x = x + w / 2 + (off ? off(0) : 0);
         else b.smear.end ??= now;
       }
 
       if (!fastGlow) bctx.shadowColor = colorOf(b.note, 60, 1, b.vel);
-      bctx.fillStyle = colorOf(b.note, light, 0.92, b.vel);
+      if (dOn) { // solid up to the line, then fading out to nothing at dGone
+        const fg = bctx.createLinearGradient(0, dLine, 0, dGone);
+        fg.addColorStop(0, colorOf(b.note, light, 0.92, b.vel)); fg.addColorStop(1, colorOf(b.note, light, 0, b.vel));
+        bctx.fillStyle = fg;
+      } else bctx.fillStyle = colorOf(b.note, light, 0.92, b.vel);
       bctx.beginPath(); barPath(off, x, yTop, w, h, r); bctx.fill();
 
       // The bright core goes on after the glow, so the glow keeps the bar's colour
       const cw = w * 0.42;
-      cores.push(off, x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round, 0.16 + ve * 0.2);
+      cores.push(off, x + (w - cw) / 2, yTop + r * 0.5, cw, Math.max(h - r, 1), cw / 2 * S.round, 0.16 + ve * 0.2, dOn ? dLine : NaN);
     }
     bctx.shadowBlur = 0;
     if (fastGlow && S.glow > 0 && cores.length) glowBars();
-    for (let i = 0; i < cores.length; i += 7) {
-      bctx.fillStyle = `rgba(255,255,255,${cores[i + 6]})`;
+    for (let i = 0; i < cores.length; i += 8) {
+      const a = cores[i + 6], line = cores[i + 7];
+      if (line === line) { // a dissolving bar's core fades with it
+        const fg = bctx.createLinearGradient(0, line, 0, line - dZone);
+        fg.addColorStop(0, `rgba(255,255,255,${a})`); fg.addColorStop(1, 'rgba(255,255,255,0)');
+        bctx.fillStyle = fg;
+      } else bctx.fillStyle = `rgba(255,255,255,${a})`;
       bctx.beginPath(); barPath(cores[i], cores[i + 1], cores[i + 2], cores[i + 3], cores[i + 4], cores[i + 5]); bctx.fill();
     }
     bctx.restore();
 
     // Bars cover the backdrop instead of adding to it, so nothing shows through them
     ctx.drawImage(barCanvas, 0, 0, W, H);
+    if (smoke.length) drawSmoke(dt, now);
 
     // Impact glow + continuous sparks for held notes
     ctx.globalCompositeOperation = 'lighter';
