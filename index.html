@@ -284,6 +284,15 @@
       { key: 'wwind',     label: 'Wind',            min: -1,   max: 1,   step: 0.01, def: 0,   when: () => S.weather > 0 },
       { key: 'wspeed',    label: 'Fall speed',      min: 0.3,  max: 3,   step: 0.01, def: 1,   when: () => S.weather > 0 },
     ] },
+    // The whole picture drawn in big square pixels with a few colours, like an old games console.
+    // The geometry can keep its fine lines and sit on top of the pixels. Randomize leaves Kind alone.
+    { title: '8-bit', controls: [
+      { key: 'xmode',     label: 'Kind',            min: 0,    max: 1,   step: 1,    def: 0, choice: true, names: ['Off', 'On'], keep: true },
+      { key: 'xpix',      label: 'Pixel size',      min: 2,    max: 16,  step: 1,    def: 6, when: () => S.xmode === 1 },
+      { key: 'xcolors',   label: 'Color levels',    min: 2,    max: 8,   step: 1,    def: 4, when: () => S.xmode === 1 },
+      { key: 'xdither',   label: 'Dither',          min: 0,    max: 1,   step: 1,    def: 0, names: ['Off', 'On'], when: () => S.xmode === 1 },
+      { key: 'xgeo',      label: 'Geometry',        min: 0,    max: 1,   step: 1,    def: 0, names: ['Sharp', 'Pixelated'], when: () => S.xmode === 1 },
+    ] },
     // The settings below belong to this screen, so presets and Randomize leave them alone.
     { title: 'Windows', controls: [
       { key: 'popacity',  label: 'Controls opacity', min: 0,   max: 1,   step: 0.01, def: 0.85, local: true },
@@ -373,7 +382,7 @@
     }
   }
   // Short sections share a column
-  for (const titles of [['Keyboard'], ['Microphone', 'Particles', 'Weather', 'Windows'], ['Geometry', 'Strip', 'Click'], ['Reaction', 'Image', 'Presets']]) {
+  for (const titles of [['Keyboard'], ['Microphone', 'Particles', 'Weather', 'Windows'], ['Geometry', 'Strip', '8-bit', 'Click'], ['Reaction', 'Image', 'Presets']]) {
     const col = document.createElement('div');
     rows.appendChild(col);
     col.append(...titles.map(t => sections[t]));
@@ -387,7 +396,7 @@
   };
   // Every control gets a uniform random value from its own range
   const randomize = () => {
-    for (const c of CONTROLS) if (!c.local) inputs[c.key].set(c.min + Math.random() * (c.max - c.min));
+    for (const c of CONTROLS) if (!c.local && !c.keep) inputs[c.key].set(c.min + Math.random() * (c.max - c.min));
     changed();
   };
   document.getElementById('random').onclick = randomize;
@@ -532,7 +541,7 @@
 
   // ---------- Canvas ----------
   const canvas = document.getElementById('c');
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d'); // drawGeometry is pointed at its own layer in 8-bit mode
   // Bars render to their own layer: they glow additively against each other, then cover the backdrop
   const barCanvas = document.createElement('canvas');
   const bctx = barCanvas.getContext('2d');
@@ -560,6 +569,53 @@
     gctx.filter = `blur(${sigma / k}px)`;
     gctx.drawImage(barCanvas, 0, 0, W / k, H / k);
     bctx.drawImage(glowCanvas, 0, 0, gw * k, gh * k);
+  }
+
+  // ---------- 8-bit ----------
+  // The finished frame is shrunk to one sample per block, its colours cut to a few levels per
+  // channel (with an ordered dither if on), and blown back up without smoothing. A sharp
+  // geometry layer is then added on top, cut away wherever a bar covers it.
+  const geoCanvas = document.createElement('canvas'), geoCtx = geoCanvas.getContext('2d');
+  const shrink = document.createElement('canvas'), shrinkCtx = shrink.getContext('2d'); // on the GPU
+  const pix = document.createElement('canvas'), px8 = pix.getContext('2d', { willReadFrequently: true });
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16 - 0.5);
+  function pixelate(sharpGeo) {
+    const p = S.xpix, sw = Math.ceil(W / p), sh = Math.ceil(H / p);
+    for (const c of [shrink, pix]) if (c.width !== sw || c.height !== sh) { c.width = sw; c.height = sh; }
+    const big = (c, src) => { c.imageSmoothingEnabled = false; c.drawImage(src, 0, 0, sw * p * DPR, sh * p * DPR); };
+    shrinkCtx.globalCompositeOperation = 'copy';
+    shrinkCtx.imageSmoothingEnabled = true; shrinkCtx.imageSmoothingQuality = 'high';
+    shrinkCtx.drawImage(canvas, 0, 0, W / p, H / p);
+    px8.globalCompositeOperation = 'copy';
+    px8.drawImage(shrink, 0, 0);
+    const img = px8.getImageData(0, 0, sw, sh), d = img.data, lv = S.xcolors - 1, k = lv / 255, u = 255 / lv;
+    const dith = S.xdither === 1 ? 0.6 : 0; // softer than a full step, so near-black stays black
+    for (let y = 0, i = 0; y < sh; y++) {
+      const row = (y & 3) * 4;
+      for (let x = 0; x < sw; x++, i += 4) {
+        const t = dith * BAYER[row + (x & 3)];
+        d[i] = Math.round(d[i] * k + t) * u;
+        d[i + 1] = Math.round(d[i + 1] * k + t) * u;
+        d[i + 2] = Math.round(d[i + 2] * k + t) * u;
+        d[i + 3] = 255;
+      }
+    }
+    px8.putImageData(img, 0, 0);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    big(ctx, pix);
+    if (sharpGeo) {
+      // Bars cover the figure, as they do when it is drawn in place, block for block
+      shrinkCtx.drawImage(barCanvas, 0, 0, W / p, H / p);
+      geoCtx.save();
+      geoCtx.setTransform(1, 0, 0, 1, 0, 0);
+      geoCtx.globalCompositeOperation = 'destination-out';
+      big(geoCtx, shrink);
+      geoCtx.restore();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(geoCanvas, 0, 0);
+    }
+    ctx.restore();
   }
 
   // Gradients are built once and reused until the value they were built from changes
@@ -2057,7 +2113,17 @@
     for (const b of held.values()) downBar[b.note] = b;
 
     drawClouds(now, keyTop);
-    drawGeometry(dt, now, keyTop);
+    // In 8-bit mode with Geometry Sharp, the figure goes on its own layer, laid over the pixels at the end
+    const sharpGeo = S.xmode === 1 && S.xgeo === 0;
+    if (sharpGeo) {
+      if (geoCanvas.width !== canvas.width || geoCanvas.height !== canvas.height) { geoCanvas.width = canvas.width; geoCanvas.height = canvas.height; }
+      geoCtx.setTransform(1, 0, 0, 1, 0, 0);
+      geoCtx.clearRect(0, 0, geoCanvas.width, geoCanvas.height);
+      geoCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      const main = ctx;
+      ctx = geoCtx;
+      try { drawGeometry(dt, now, keyTop); } finally { ctx = main; }
+    } else drawGeometry(dt, now, keyTop);
     drawWeather(dt, now, keyTop);
 
     // Bars
@@ -2324,6 +2390,7 @@
       ctx.globalAlpha = 1;
     }
 
+    if (S.xmode === 1) pixelate(sharpGeo);
     notesTick(now);
     requestAnimationFrame(frame);
   }
