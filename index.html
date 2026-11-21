@@ -61,11 +61,13 @@
   #panel.peek { background-color: transparent; border-color: transparent; }
   #panel.peek details > :not(.live) { opacity: 0; }
   #panel.peek .live { background-color: rgba(18, 20, 30, .85); box-shadow: 0 0 0 8px rgba(18, 20, 30, .85); border-radius: 4px; }
-  /* A column per group of sections; they wrap when the window is narrow. A column whose sections
-     are all closed is only as wide as its headings, so the panel shrinks around what is open. */
+  /* Columns of sections, dealt out by layoutPanel() to fit the room the panel has. A column whose
+     sections are all closed is only as wide as its headings, so the panel shrinks around what is open.
+     A loose panel's columns stretch a little to fill the width it was given. */
   #rows { display: flex; flex-wrap: wrap; gap: 0 22px; align-items: flex-start; }
   #rows > div { width: 215px; }
-  #rows > div:not(:has(details[open])) { width: auto; }
+  #panel.float #rows > div { flex: 1 1 215px; max-width: 290px; }
+  #rows > div:not(:has(details[open])), #panel.float #rows > div:not(:has(details[open])) { width: auto; flex: none; }
   @media (max-width: 520px) {
     #panel:has(details[open]) { width: calc(100vw - 28px); }
     #rows > div:has(details[open]) { width: 100%; }
@@ -381,11 +383,14 @@
       section.appendChild(row);
     }
   }
-  // Short sections share a column
-  for (const titles of [['Keyboard'], ['Microphone', 'Particles', 'Weather', 'Windows'], ['Geometry', 'Strip', '8-bit', 'Click'], ['Reaction', 'Image', 'Presets']]) {
+  // Short sections share a column. This is the layout whenever there is width for it; layoutPanel()
+  // deals the sections out afresh, in this order, when there is less.
+  const COLUMNS = [['Keyboard'], ['Microphone', 'Particles', 'Weather', 'Windows'], ['Geometry', 'Strip'], ['8-bit', 'Click'], ['Reaction', 'Image', 'Presets']]
+    .map(titles => titles.map(t => sections[t]));
+  for (const list of COLUMNS) {
     const col = document.createElement('div');
     rows.appendChild(col);
-    col.append(...titles.map(t => sections[t]));
+    col.append(...list);
   }
   // Some sliders only apply in one mode; show them only then
   function syncRows() { for (const c of CONTROLS) if (c.when) inputs[c.key].rows.forEach(r => r.hidden = !c.when()); }
@@ -2463,6 +2468,90 @@
   let sizeTimer;
   new ResizeObserver(() => { clearTimeout(sizeTimer); sizeTimer = setTimeout(saveFloat, 200); }).observe(panel);
   addEventListener('resize', clampFloat);
+
+  // ---------- Panel layout ----------
+  // The sections are laid out to suit the room the panel has: the window when docked, the size it
+  // was given when loose. Zooming the page changes that room too. With width for the usual columns,
+  // they stay as they are, and spare width splits a column that runs past the bottom. With less,
+  // the sections are dealt, in order, into as many columns as fit, evened out so none runs much
+  // longer than the rest. Docked, the panel uses no more columns than it needs to clear the bottom.
+  const COL_W = 215, COL_GAP = 22, SEC_GAP = 10;
+  const ORDER = COLUMNS.flat();
+  const heightOf = list => list.reduce((a, s) => a + s.offsetHeight + SEC_GAP, 0);
+  // The k columns, in order, whose tallest is as short as it can be, and of those, the most even
+  const deal = (list, k) => {
+    const n = list.length;
+    k = Math.min(k, n);
+    const pre = [0];
+    for (const s of list) pre.push(pre.at(-1) + s.offsetHeight + SEC_GAP);
+    // cost[i]: best score with the first i sections in j columns; cuts[j][i]: where column j starts
+    const solve = add => {
+      let cost = pre.map((_, i) => i ? Infinity : 0);
+      const cuts = [];
+      for (let j = 1; j <= k; j++) {
+        const next = pre.map(() => Infinity), cut = [];
+        for (let i = j; i <= n; i++) for (let m = j - 1; m < i; m++) {
+          const v = add(cost[m], pre[i] - pre[m]);
+          if (v < next[i]) { next[i] = v; cut[i] = m; }
+        }
+        cuts.push(cut);
+        cost = next;
+      }
+      return { score: cost[n], cuts };
+    };
+    const tallest = solve(Math.max).score;
+    const { cuts } = solve((a, h) => h > tallest ? Infinity : a + h * h);
+    const cols = [];
+    for (let j = k, i = n; j >= 1; j--) { const m = cuts[j - 1][i]; cols.unshift(list.slice(m, i)); i = m; }
+    return cols;
+  };
+  const panelColumns = () => {
+    const float = panel.classList.contains('float');
+    const scrollbar = panel.offsetWidth - panel.clientWidth - 2;
+    const width = (float ? panel.clientWidth : innerWidth - 30 - scrollbar) - 32;
+    const height = (float ? panel.clientHeight : innerHeight - 76) - rows.offsetTop - 12;
+    const fit = Math.max(1, Math.floor((width + COL_GAP) / (COL_W + COL_GAP)));
+    if (fit >= COLUMNS.length) {
+      const cols = COLUMNS.map(c => c.slice());
+      while (cols.length < fit) {
+        const over = cols.filter(c => c.length > 1 && heightOf(c) > height);
+        if (!over.length) break;
+        const tall = over.reduce((a, c) => heightOf(c) > heightOf(a) ? c : a);
+        cols.splice(cols.indexOf(tall), 1, ...deal(tall, 2));
+      }
+      return cols;
+    }
+    if (float) return deal(ORDER, fit);
+    for (let k = 1; ; k++) {
+      const cols = deal(ORDER, k);
+      if (k >= fit || Math.max(...cols.map(heightOf)) <= height) return cols;
+    }
+  };
+  let layoutKey = '';
+  const layoutPanel = () => {
+    if (panel.hidden) return;
+    const cols = panelColumns();
+    const key = cols.map(c => c.map(s => ORDER.indexOf(s)).join()).join('|');
+    if (key === layoutKey) return;
+    layoutKey = key;
+    const focused = document.activeElement, scroll = panel.scrollTop;
+    rows.replaceChildren(...cols.map(list => { const col = document.createElement('div'); col.append(...list); return col; }));
+    panel.scrollTop = scroll;
+    if (focused && focused !== document.activeElement && rows.contains(focused)) focused.focus({ preventScroll: true });
+  };
+  // Once a frame at most, and never under a slider that is being dragged
+  let layoutQueued = false, sliding = false;
+  const queueLayout = () => {
+    if (layoutQueued) return;
+    layoutQueued = true;
+    requestAnimationFrame(() => { layoutQueued = false; if (!sliding) layoutPanel(); });
+  };
+  panel.addEventListener('pointerdown', e => { if (e.target.matches('input[type=range]')) sliding = true; });
+  for (const type of ['pointerup', 'pointercancel']) addEventListener(type, () => { if (sliding) { sliding = false; queueLayout(); } });
+  const layoutWatch = new ResizeObserver(queueLayout);
+  layoutWatch.observe(panel);
+  ORDER.forEach(s => layoutWatch.observe(s));
+  addEventListener('resize', queueLayout);
   const toggleFs = () => {
     if (document.fullscreenElement) document.exitFullscreen();
     else document.documentElement.requestFullscreen().catch(() => {});
